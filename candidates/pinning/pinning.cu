@@ -7,7 +7,14 @@
 #define QSB_FIN_LEA 1 /* ercumentyildirim b62c41b8 via cefika 6fd66979: the same LEA.HI rotate-add in the finish pubkey hash Sigma adds (exact); 0 = off */
 #endif
 /* l2state variant fkF20c8 + split retry */
+#ifndef QSB_SUB_FINE
+#define QSB_SUB_FINE 1
+#endif
+#if QSB_SUB_FINE
+#define QSB_SUBPIPE 65536
+#else
 #define QSB_SUBPIPE 131072
+#endif
 #define QSB_SUBRING 4 /* SUBRING 4 + SLOTS 5: host pipeline depth measured on intel-r5 (ercumentyildirim 127d95d4) */
 #define QSB_ROOT_FUSED 1
 #ifndef QSB_PERSIST_WINDOW_CAP
@@ -17,7 +24,7 @@
 #ifndef QSB_GREEN
 #define QSB_GREEN 20 /* finish green partition 22 -> 20 SMs (8 shared): the cheaper MLATE/CHORD/SUMU finish fits the crown's partition again; host only */
 #endif
-#define QSB_GREEN_SHARED 8
+#define QSB_GREEN_SHARED 10
 #ifndef QSB_CODEX_DRAW_20260924_C
 #define QSB_CODEX_DRAW_20260924_C 1 /* no runtime effect; identifies the ranked GLV-lean control draw */
 #endif
@@ -108,6 +115,17 @@
 #ifndef QSB_LAZY_REC
 #define QSB_LAZY_REC 1   /* raw u,v and lazy m,sum in the packed recovery finish */
 #endif
+
+#ifndef QSB_STATE_LNUM
+#define QSB_STATE_LNUM 1
+#endif
+
+#ifndef QSB_WROOT_DBL
+#define QSB_WROOT_DBL 1
+#endif
+#if QSB_WROOT_DBL && !QSB_STATE_LNUM
+#error "QSB_WROOT_DBL needs QSB_STATE_LNUM (u must feed only sum)"
+#endif
 #ifndef QSB_FIELD_SC
 #define QSB_FIELD_SC 1
 #endif
@@ -155,6 +173,17 @@
 #error "QSB_ASICBOOST replaces the QSB_UNIF_DP tail transform; it does not combine with QSB_TAIL_TAB or QSB_SHA_SMEM_W1"
 #endif
 #define QSB_AB_K 4       /* sequences per launch under QSB_ASICBOOST: one per warp of a 128-thread block */
+#ifndef QSB_AB_B0CONST
+#define QSB_AB_B0CONST 1
+
+#endif
+#if QSB_AB_B0CONST && !QSB_ASICBOOST
+#error "QSB_AB_B0CONST transposes the QSB_ASICBOOST locktime walk"
+#endif
+#ifndef QSB_AB_WHOLE_BATCH
+#define QSB_AB_WHOLE_BATCH 0
+
+#endif
 #ifndef QSB_SHA_OPT
 #define QSB_SHA_OPT 1    /* constant-folded SHA transforms (sha_pinsha.cuh): literal K, IV round-1 Maj,
                           * feed-forward folded into round 63, word-0-only pubkey hash */
@@ -257,21 +286,18 @@ static_assert(alignof(ulonglong2) == 16, "pipeline vector must be 16-byte aligne
 #else
 #define QSB_PMIX12_SEL() ((blockIdx.x&(QSB_PMIX12-1u))==0u)
 #endif
-/* QSB_QMIX5 (0 or a power of two K >= 2; default 0 = compiled out): the reverse of QSB_PMIX12.
- * Every K-th prepare block ((blockIdx.x & (K-1)) == 0, block-uniform) decodes Q with P's
- * five-term GLV11 decoder (segments 0, 6, 7, 4, 5; q11_bigtbl_code_z) instead of GLV12's six
- * (segments 0..5). Both decoders telescope to the same segment-0 bias (GLVScalar.cuh), so the
- * digits sum to the same Q component for every residual and the chain's point is identical.
- * Such a block runs 10 terms (9 additions instead of 10) and 8 cold-bank gathers instead of 6.
- * Layout: the block's five Q terms take slots 1..5 (term t in slot t+1; the two seeds stay in
- * registers) and P keeps slots GT_Q_TERMS.. untouched, so the chain simply starts at term 1
- * instead of 0 and phi still runs before term GT_Q_TERMS, exactly between the Q and the P sum.
- * Slots 4 and 5 hold the same codes in both decoders (segments 4 and 5), segment 7's field
- * ends at bit 72 like segment 3's (same top-aligned window), and segment 6 starts at bit 18
- * like segment 1: only the shift and offset constants of seed 1 and slot 3 depend on the block.
- * Slot 2 (segment 2) is still written and never read by such a block. */
+
+#ifndef QSB_QMIX5_DEAD2
+#define QSB_QMIX5_DEAD2 1
+#endif
+#if QSB_QMIX5_DEAD2 != 0 && QSB_QMIX5_DEAD2 != 1
+#error "QSB_QMIX5_DEAD2 must be 0 or 1"
+#endif
 #ifndef QSB_QMIX5
 #define QSB_QMIX5 8
+#endif
+#if QSB_QMIX5_DEAD2 && !QSB_QMIX5
+#error "QSB_QMIX5_DEAD2 skips slot 2 only on a QSB_QMIX5 five-term block"
 #endif
 #if QSB_QMIX5 != 0 && (QSB_QMIX5 < 2 || (QSB_QMIX5 & (QSB_QMIX5-1)) != 0)
 #error "QSB_QMIX5 must be 0 or a power of two >= 2"
@@ -279,7 +305,26 @@ static_assert(alignof(ulonglong2) == 16, "pipeline vector must be 16-byte aligne
 #if QSB_QMIX5 && (!QSB_GLV11 || QSB_QGLV5 || !QSB_PDEC_Z)
 #error "QSB_QMIX5 mixes five-term Q blocks into the GLV11 chain (QSB_GLV11=1, QSB_QGLV5=0, QSB_PDEC_Z=1)"
 #endif
-#define QSB_QMIX5_SEL() ((blockIdx.x&(QSB_QMIX5-1u))==0u)
+
+#ifndef QSB_QMIX5_N
+#define QSB_QMIX5_N 6
+#endif
+#if QSB_QMIX5 && (QSB_QMIX5_N < 1 || QSB_QMIX5_N >= QSB_QMIX5)
+#error "QSB_QMIX5_N must satisfy 1 <= N < QSB_QMIX5"
+#endif
+
+__host__ __device__ constexpr unsigned qsb_qmix5_mask(unsigned n,unsigned k,unsigned r=0u) {
+    return r>=k?0u:((((r*n)%k)<n?1u:0u)<<r)|qsb_qmix5_mask(n,k,r+1u);
+}
+#define QSB_QMIX5_SEL() \
+    (((qsb_qmix5_mask((unsigned)QSB_QMIX5_N,(unsigned)QSB_QMIX5)>>(blockIdx.x&(QSB_QMIX5-1u)))&1u)!=0u)
+
+#ifndef QSB_QMIX5_COLDPOL
+#define QSB_QMIX5_COLDPOL 1
+#endif
+#if QSB_QMIX5_COLDPOL != 0 && QSB_QMIX5_COLDPOL != 1
+#error "QSB_QMIX5_COLDPOL must be 0 or 1"
+#endif
 #ifndef QSB_BATCH
 #define QSB_BATCH 4194304    /* candidates per pipeline launch */
 #endif
@@ -402,6 +447,18 @@ static_assert(alignof(ulonglong2) == 16, "pipeline vector must be 16-byte aligne
 #endif
 #ifndef QSB_PHI_HOIST
 #define QSB_PHI_HOIST 1       /* 1: phi between two passes of the peeled one-add trip loop, not inside it */
+
+#ifndef QSB_BETA_CONST
+#define QSB_BETA_CONST 1
+#endif
+#if QSB_BETA_CONST != 0 && QSB_BETA_CONST != 1
+#error "QSB_BETA_CONST must be 0 or 1"
+#endif
+#if QSB_BETA_CONST
+__device__ __constant__ uint64_t qsb_phi_beta[4]={
+    0xC1396C28719501EEULL,0x9CF0497512F58995ULL,
+    0x6E64479EAC3434E9ULL,0x7AE96A2B657C0710ULL};
+#endif
 #endif
 #ifndef QSB_CHAIN_PEEL
 #define QSB_CHAIN_PEEL 1      /* 1: the one-add chain loop's final unpiped trip peeled out of the loop body */
@@ -707,16 +764,28 @@ __host__ __device__ __forceinline__ int gt_shift(int c) {
     return (int)q9_bigtbl_shift(c);
 }
 static_assert(GT_TOTAL_ENTRIES*64ULL ==
-              (QSB_GLV11?22688113472ULL:QSB_FOUR_HOT?9803211584ULL:1465193024ULL),
+              (QSB_GLV11?(QSB_H40?22679724864ULL:22688113472ULL):
+               QSB_FOUR_HOT?9803211584ULL:1465193024ULL),
               "GLV12 geometry/table-byte mismatch");
 static_assert(GT_TOTAL_ENTRIES < 0x80000000u, "record index must not use sign bit");
 #if QSB_GLV11
+#if QSB_H40
+static_assert(262144u+131072u == 393216u && 393216u+131072u == 524288u &&
+              524288u+131072u == 655360u && 655360u+134217728u == 134873088u &&
+              134873088u+85279885u == 220152973u &&
+              220152973u+67108864u == 287261837u &&
+              287261837u+67108864u == GT_TOTAL_ENTRIES,
+              "QSB_HOT40 segments must be back to back");
+static_assert(((2u*134217728u-1u)>>QSB_GT_RADIX_BITS) < GT_HI,
+              "H ladder must cover segment 4's largest odd multiplier");
+#else
 static_assert(786432u+67108864u+85279885u == 153175181u &&
               153175181u+67108864u == 220284045u &&
               220284045u+134217728u == GT_TOTAL_ENTRIES,
               "segments 6 and 7 must follow segment 5 back to back");
 static_assert(((2u*134217728u-1u)>>QSB_GT_RADIX_BITS) < GT_HI,
               "H ladder must cover segment 7's largest odd multiplier");
+#endif
 #endif
 #else
 /* Exact 14-term GLV table shared by the two signed components.  The seven
@@ -903,7 +972,6 @@ __device__ __forceinline__ void gt_digit_idx(int32_t ec, uint32_t *idx, uint64_t
 #endif
     *neg = (ec < 0) ? 1ULL : 0ULL;
 }
-
 
 /* Direct regular-digit extraction (donor @dun999, public submission f535811)
  * with the digit window carried in registers (idea from the subset track's
@@ -1097,6 +1165,9 @@ __global__ void qsb_table_offset_y(uint8_t *gTable) {
 #if (QSB_POST_GLUE & 4) && !(QSB_POST_GLUE & 16)
 #error "QSB_POST_GLUE bit 4 changes the statements of bit 16"
 #endif
+#if QSB_STATE_LNUM && !(QSB_POST_GLUE & 16)
+#error "QSB_STATE_LNUM shifts the anchor in the QSB_POST_GLUE bit 16 resolve"
+#endif
 __device__ __forceinline__ uint64_t *qsb_digit_arena() {
 #if QSB_TREE_GFILL && (QSB_POST_GLUE & 1)
     /* 16-byte aligned: the tree keeps limb pairs as 16-byte entries (QSB_POST_GLUE bit 1). */
@@ -1269,16 +1340,15 @@ __host__ __device__ __forceinline__ void qsb_qmix5_seed1(const uint64_t w[2],boo
                                                          uint32_t *rec,uint32_t *msk) {
     const uint32_t ws[4]={(uint32_t)w[0],(uint32_t)(w[0]>>32),(uint32_t)w[1],(uint32_t)(w[1]>>32)};
     uint32_t u;
-    *rec=qsb_qmix5_radix(ws,q5,q9_bigtbl_shift(1),19u,q9_bigtbl_offset(1),
-                         q9_bigtbl_shift(6),27u,q9_bigtbl_offset(6),&u,msk);
+    *rec=qsb_qmix5_radix(ws,q5,q9_bigtbl_shift(1),QSB_GT_W1,q9_bigtbl_offset(1),
+                         q9_bigtbl_shift(6),QSB_GT_W6,q9_bigtbl_offset(6),&u,msk);
 }
-/* Slot 3's code: segment 3 (18 bits at shift 55), or segment 7 (28 bits at shift 45, the
- * five-term decoder's term 2) when q5; q9_bigtbl_code_z's final sign step v ^ (~u & 2^31). */
+
 __host__ __device__ __forceinline__ uint32_t qsb_qmix5_code3(const uint64_t w[2],bool q5) {
     const uint32_t ws[4]={(uint32_t)w[0],(uint32_t)(w[0]>>32),(uint32_t)w[1],(uint32_t)(w[1]>>32)};
     uint32_t u,xs;
     const uint32_t v=qsb_qmix5_radix(ws,q5,q9_bigtbl_shift(3),18u,q9_bigtbl_offset(3),
-                                     q9_bigtbl_shift(7),28u,q9_bigtbl_offset(7),&u,&xs);
+                                     q9_bigtbl_shift(7),QSB_GT_W7,q9_bigtbl_offset(7),&u,&xs);
 #ifdef __CUDA_ARCH__
     uint32_t code;
     asm("lop3.b32 %0,%1,%2,0x80000000,0xD2;" : "=r"(code) : "r"(v),"r"(u));  /* v ^ (~u & 2^31) */
@@ -1297,6 +1367,9 @@ __device__ __forceinline__ void qsb_decode_q_qmix5(const uint64_t w[2],uint32_t 
         bool q5) {
     q9_bigtbl_seed_z(w,m32,0,seed0,msk0);
     qsb_qmix5_seed1(w,q5,seed1,msk1);
+#if QSB_QMIX5_DEAD2
+    if(!q5)
+#endif
     codes[(size_t)2*QSB_TREE_N+threadIdx.x]=q9_bigtbl_code_z(w,top,m32,2);
     codes[(size_t)3*QSB_TREE_N+threadIdx.x]=qsb_qmix5_code3(w,q5);
     codes[(size_t)4*QSB_TREE_N+threadIdx.x]=q9_bigtbl_code_z(w,top,m32,4);
@@ -1398,6 +1471,29 @@ __device__ __forceinline__ uint32_t qsb_code_idx(uint32_t code) {
 #error "QSB_GATHER_LEA2 is written for the QSB_BIGTBL code layout with QSB_YOFF ordinates"
 #endif
 static_assert(GT_TOTAL_ENTRIES < 0x80000000u, "record must fit below the sign bit");
+#if QSB_QMIX5 && QSB_QMIX5_COLDPOL && QSB_SM80_PTX
+#define QSB_COLDPOL_ON 1
+
+__device__ __forceinline__ void qsb_ld_rec_coldpol(uint64_t a,uint32_t rec,ulonglong2 &x0,
+        ulonglong2 &x1,ulonglong2 &y0,ulonglong2 &y1) {
+    uint64_t pc;
+    asm("createpolicy.fractional.L2::evict_first.b64 %0, 1.0;" : "=l"(pc));
+    asm("{ .reg .u64 g; .reg .pred c; cvta.to.global.u64 g, %8; setp.ge.u32 c, %9, %10;\n\t"
+        "@c  ld.global.nc.L2::cache_hint.L2::64B.v2.u64 {%0,%1}, [g], %11;\n\t"
+        "@!c ld.global.nc.L2::64B.v2.u64 {%0,%1}, [g];\n\t"
+        "@c  ld.global.nc.L2::cache_hint.v2.u64 {%2,%3}, [g+16], %11;\n\t"
+        "@!c ld.global.nc.v2.u64 {%2,%3}, [g+16];\n\t"
+        "@c  ld.global.nc.L2::cache_hint.v2.u64 {%4,%5}, [g+32], %11;\n\t"
+        "@!c ld.global.nc.v2.u64 {%4,%5}, [g+32];\n\t"
+        "@c  ld.global.nc.L2::cache_hint.v2.u64 {%6,%7}, [g+48], %11;\n\t"
+        "@!c ld.global.nc.v2.u64 {%6,%7}, [g+48]; }"
+        : "=l"(x0.x), "=l"(x0.y), "=l"(x1.x), "=l"(x1.y),
+          "=l"(y0.x), "=l"(y0.y), "=l"(y1.x), "=l"(y1.y)
+        : "l"(a), "r"(rec), "r"(q9_bigtbl_offset(4)), "l"(pc));
+}
+#else
+#define QSB_COLDPOL_ON 0
+#endif
 __device__ __forceinline__ void qsb_load_glv_code_lea(const uint8_t *table,uint32_t code,
                                                       uint64_t *x,uint64_t *y) {
     uint64_t a;   /* a = table + (u64)(code & 0x7fffffff) * 64 */
@@ -1411,7 +1507,12 @@ __device__ __forceinline__ void qsb_load_glv_code_lea(const uint8_t *table,uint3
     const uint64_t m=((uint64_t)m32<<32)|m32;
     const ulonglong2 *tx=(const ulonglong2 *)a;
     const ulonglong2 *ty=(const ulonglong2 *)(a+32);
+#if QSB_COLDPOL_ON
+    ulonglong2 x0,x1,y0,y1;
+    qsb_ld_rec_coldpol(a,code&0x7fffffffu,x0,x1,y0,y1);
+#else
     ulonglong2 x0=qsb_ld_rec_head(tx),x1=__ldg(tx+1),y0=__ldg(ty),y1=__ldg(ty+1);
+#endif
     x[0]=x0.x;x[1]=x0.y;x[2]=x1.x;x[3]=x1.y;
     y[0]=y0.x^m;y[1]=y0.y^m;y[2]=y1.x^m;y[3]=y1.y^m;
 }
@@ -1429,7 +1530,14 @@ __device__ __forceinline__ void qsb_load_glv_rec(const uint8_t *table,uint32_t r
     const uint64_t m=((uint64_t)msk<<32)|msk;
     const ulonglong2 *tx=(const ulonglong2 *)a;
     const ulonglong2 *ty=(const ulonglong2 *)(a+32);
+#if QSB_COLDPOL_ON
+
+    ulonglong2 x0,x1,y0,y1;
+    if(NEG) qsb_ld_rec_coldpol(a,rec,x0,x1,y0,y1);
+    else { x0=qsb_ld_rec_head(tx);x1=__ldg(tx+1);y0=__ldg(ty);y1=__ldg(ty+1); }
+#else
     ulonglong2 x0=qsb_ld_rec_head(tx),x1=__ldg(tx+1),y0=__ldg(ty),y1=__ldg(ty+1);
+#endif
     x[0]=x0.x;x[1]=x0.y;x[2]=x1.x;x[3]=x1.y;
     if(NEG){y[0]=y0.x^~m;y[1]=y0.y^~m;y[2]=y1.x^~m;y[3]=y1.y^~m;}
     else{y[0]=y0.x^m;y[1]=y0.y^m;y[2]=y1.x^m;y[3]=y1.y^m;}
@@ -1507,23 +1615,7 @@ __device__ __forceinline__ void qsb_pf_rec(const uint8_t *table,uint32_t code) {
     qsb_prefetch_l2(qsb_pipe_half(table,code,0u));
     qsb_prefetch_l2(qsb_pipe_half(table,code,32u));
 }
-/* QSB_TBL_L2POL (0, 1 or 2; default 1): L2 eviction priority of the piped chain gathers.
- * Records below QSB_HOT_RECS (segments 0..3 under QSB_FOUR_HOT, 48 MiB: the banks sized to
- * stay in the 72 MiB L2) are hot; every record at or above it lies in the 4-8 GiB cold banks
- * (segments 4..7), where an L2 line is re-read with probability below 72 MiB / 4 GiB before
- * it is displaced. 1: a cold gather carries an L2::evict_first cache policy, so its line is
- * the preferred victim of its set and the next cold fill displaces it instead of a hot
- * record; hot gathers keep evict_normal. 2: as 1, and hot gathers carry evict_last. The
- * host pins the same hot prefix with a persisting access-policy window on every slot
- * stream (hitProp persisting = evict_last); an explicit per-load cache hint replaces the
- * launch's window policy for that load, so under 1 the hot gathers were demoted to
- * evict_normal and competed with the cold fills. 2 hands them the window's own priority.
- * The policy is a per-lane select on the record index (warp-uniform in practice: a chain
- * slot reads one segment), and only the carrier's native loads carry it. A cache policy
- * changes which line leaves L2, never the bytes a load returns, so every value is
- * unchanged. 0 keeps the unhinted loads. 1 is the policy measured at +1.15 %
- * on this tree (RTX 4090, ABBA): cold lines are the preferred victims and hot
- * gathers stay evict_normal. 2 also marks hot gathers evict_last. */
+
 #ifndef QSB_TBL_L2POL
 #define QSB_TBL_L2POL 1
 #endif
@@ -1533,7 +1625,7 @@ __device__ __forceinline__ void qsb_pf_rec(const uint8_t *table,uint32_t code) {
 #if QSB_TBL_L2POL && !(QSB_BIGTBL && QSB_FOUR_HOT)
 #error "QSB_TBL_L2POL takes the hot/cold split from the QSB_FOUR_HOT bank order"
 #endif
-#define QSB_HOT_RECS 786432u   /* q9_bigtbl_offset(4): segments 0..3, 48 MiB */
+#define QSB_HOT_RECS (QSB_H40?655360u:786432u)
 #ifndef QSB_TBL_POL_PRED
 #define QSB_TBL_POL_PRED 1
 #endif
@@ -1788,6 +1880,10 @@ __device__ __forceinline__ void qsb_pointadd_pair(
 #error "QSB_YRAW_CARRY is written for the QSB_GATHER_EARLY / QSB_ZZ_EARLY / QSB_ZZZ_3ARG trip"
 #endif
 __device__ __constant__ uint32_t pin_yoff_zero = 0;
+
+#ifndef QSB_MAC_DROW
+#define QSB_MAC_DROW 0
+#endif
 /* qsb_pointadd_pair<true> with the swap written as two XORs (QSB_YRAW_CARRY): the next
  * record's Y half is gathered into a local Yn, and on return Yoff = Y2 ^ z (this trip's Y2)
  * and Y2 = Yn (the gathered ordinate), which is what the tail swap leaves in (y0, y1). Every
@@ -1800,7 +1896,11 @@ __device__ __forceinline__ void qsb_pointadd_pair_raw(
     _ModAddLazyOff(S2,Y2,Yoff);
     qsb_load_glv_y_code(table,next_code,Yn);
     asm volatile("" ::: "memory");
+#if QSB_MAC_DROW
+    qsb_mul2add(Ry,S2,ZZZ1,Ry,Qy);
+#else
     qsb_mul2add(Ry,S2,ZZZ1,Qy,Ry);
+#endif
     _ModMult(U2,X2,ZZ1);
     qsb_load_glv_x_code(table,next_code,X2);
     QSB_SUB_CHAIN_P(P,U2,X1);
@@ -1815,6 +1915,10 @@ __device__ __forceinline__ void qsb_pointadd_pair_raw(
     for(int i=0;i<4;i++) { Yoff[i]=Y2[i]^z; Y2[i]=Yn[i]; }
 }
 #endif
+
+#ifndef QSB_SEED_SAS
+#define QSB_SEED_SAS 1
+#endif
 /* _PointAddXYZZ_mm with its deferred ordinate returned as the pair (T-Q, R). */
 __device__ void qsb_pointadd_mm_pair(uint64_t *X3,uint64_t *Qy,uint64_t *Ry,
                                      uint64_t *ZZ3,uint64_t *ZZZ3,
@@ -1826,10 +1930,15 @@ __device__ void qsb_pointadd_mm_pair(uint64_t *X3,uint64_t *Qy,uint64_t *Ry,
     _ModSqr(ZZ3,P);
     _ModMult(ZZZ3,ZZ3,P);
     _ModMult(Q,(uint64_t *)X1,ZZ3);
+#if QSB_SEED_SAS
+    _ModAddLazy(T,Q,ZZZ3);
+    _ModSqrAddSub2(T,Ry,ZZZ3,T);
+#else
     _ModSqr(T,Ry);
     QSB_SUB_SEED(T,T,ZZZ3);
     QSB_SUB_SEED(T,T,Q);
     QSB_SUB_SEED(T,T,Q);
+#endif
     QSB_SUB_SEED(Qy,T,Q);
     Load256(X3,T);
 }
@@ -2095,11 +2204,15 @@ __device__ void _FixedBaseSignedXYZZScalar(uint64_t *X,uint64_t *Y,
 #if QSB_PHI_HOIST
         if(term!=GT_Q_TERMS) break;
         {
+#if QSB_BETA_CONST
+            _ModMult(X,X,(uint64_t*)qsb_phi_beta);
+#else
             const uint64_t beta[4]={
                 0xC1396C28719501EEULL,0x9CF0497512F58995ULL,
                 0x6E64479EAC3434E9ULL,0x7AE96A2B657C0710ULL
             };
             _ModMult(X,X,(uint64_t*)beta);
+#endif
         }
     }
 #endif
@@ -2242,7 +2355,6 @@ __device__ void _FixedBaseSignedXYZZScalar(uint64_t *X,uint64_t *Y,
 #endif
 }
 
-
 /* _FixedBaseSignedAffine: removed -- dead with the diagnostic kernel. */
 
 /* DER checks */
@@ -2292,7 +2404,6 @@ __device__ __forceinline__ int gpu_bench_valid_words(const uint32_t *hs) {
 #endif
     return ok;
 }
-
 
 /* Sparse-schedule SHA-256 for the Fast 11-byte locktime tail block
  * (delta B, scarletbright 7f965b4d). Pad shape: W[0..2] live, W[3..14]=0,
@@ -2503,16 +2614,27 @@ static void qsb_make_tail_pre(qsb_tail_pre *tp, const uint32_t mid[8], uint32_t 
  *   uc = c2y + U  (so E2 = uc + W1),  ug = U + S0(A1) + (A1 & mx)  (so A2 = ug + W1).
  * Same 32-bit arithmetic as the device rounds, so the result is bit-identical. */
 struct qsb_tail_tab_t { uint32_t a1, e1, uc, ug; };
-static void qsb_make_tail_tab(qsb_tail_tab_t *tab, const qsb_tail_pre &tp, uint32_t tail0) {
-    for (int bb = 0; bb < 256; bb++) {
-        uint32_t w0 = tail0 | (uint32_t)bb;
-        uint32_t A1 = tp.v[0] + w0, E1 = tp.v[1] + w0;
-        uint32_t S1e = qsb_h_ror(E1,6) ^ qsb_h_ror(E1,11) ^ qsb_h_ror(E1,25);
-        uint32_t S0a = qsb_h_ror(A1,2) ^ qsb_h_ror(A1,13) ^ qsb_h_ror(A1,22);
-        uint32_t U = tp.v2y + S1e + (E1 & tp.mid[4]) + (~E1 & tp.mid[5]);
-        tab[bb].a1 = A1; tab[bb].e1 = E1; tab[bb].uc = tp.c2y + U; tab[bb].ug = U + S0a + (A1 & tp.mx);
-    }
+static qsb_tail_tab_t qsb_tail_r01(const qsb_tail_pre &tp, uint32_t w0) {
+    uint32_t A1 = tp.v[0] + w0, E1 = tp.v[1] + w0;
+    uint32_t S1e = qsb_h_ror(E1,6) ^ qsb_h_ror(E1,11) ^ qsb_h_ror(E1,25);
+    uint32_t S0a = qsb_h_ror(A1,2) ^ qsb_h_ror(A1,13) ^ qsb_h_ror(A1,22);
+    uint32_t U = tp.v2y + S1e + (E1 & tp.mid[4]) + (~E1 & tp.mid[5]);
+    qsb_tail_tab_t r; r.a1 = A1; r.e1 = E1; r.uc = tp.c2y + U; r.ug = U + S0a + (A1 & tp.mx);
+    return r;
 }
+static void qsb_make_tail_tab(qsb_tail_tab_t *tab, const qsb_tail_pre &tp, uint32_t tail0) {
+    for (int bb = 0; bb < 256; bb++) tab[bb] = qsb_tail_r01(tp, tail0 | (uint32_t)bb);
+}
+
+#ifndef QSB_AB_SLOT_V4
+#define QSB_AB_SLOT_V4 1
+#endif
+#if QSB_AB_SLOT_V4
+struct __align__(16) qsb_ab_slot_t { qsb_tail_pre tp; qsb_tail_tab_t r01; uint32_t pad; };
+static_assert(sizeof(qsb_ab_slot_t) == 96, "QSB_AB_SLOT_V4: six 16-byte quads per warp slot");
+#else
+struct qsb_ab_slot_t { qsb_tail_pre tp; qsb_tail_tab_t r01; };
+#endif
 
 /* Sparse-schedule SHA-256 for the SHA256d second compression (delta D,
  * preludebrace bc77eb42): 32-byte message = first digest as eight words,
@@ -2944,7 +3066,12 @@ __device__ __forceinline__ void qsb_ab_schedule_store(
 #pragma unroll
     for (int i = 3; i < 15; i++) w[i] = 0;
     w[15] = L;
+#if QSB_AB_B0CONST
+    w[0] = u0 + s0(w[1]);
+    (void)lane;
+#else
     w[0] = lane + QSB_UB(u0 + s0(w[1]));   /* W16 = W0 + s0(W1) */
+#endif
     w[1] += v5;
     w[2] += s1(w[0]);
     w[3]  = s1(w[1]);
@@ -2974,7 +3101,11 @@ __device__ __forceinline__ void qsb_ab_schedule_store(
  * block barrier that precedes this call). */
 __device__ __forceinline__ void _SHA256TransformFastTail11AB(
     uint32_t state[8], uint32_t lane, uint32_t u0, uint32_t w1,
-    const qsb_tail_pre &tp, const uint4 *sw)
+    const qsb_tail_pre &tp, const uint4 *sw
+#if QSB_AB_B0CONST
+    , const qsb_tail_tab_t &r01
+#endif
+    )
 {
     const uint32_t L = 9995u * 8u; /* 79960 */
     uint32_t t1;
@@ -2989,6 +3120,14 @@ __device__ __forceinline__ void _SHA256TransformFastTail11AB(
     uint32_t g;
     uint32_t h;
 
+#if QSB_AB_B0CONST
+
+    (void)u0;
+    h = r01.a1;
+    d = r01.e1;
+    c = r01.uc + w1;
+    g = r01.ug + w1;
+#else
     /* round 0: v0 + W0, v1 + W0 */
     h = lane + QSB_UB(tp.v[0] + u0);
     d = lane + QSB_UB(tp.v[1] + u0);
@@ -2997,6 +3136,7 @@ __device__ __forceinline__ void _SHA256TransformFastTail11AB(
     t2 = S0(h) + (h & tp.mx);
     c = tp.c2y + t1;
     g = t1 + t2;
+#endif
     /* round 2 */
     t1 = tp.v[3] + S1(c) + Ch(c,d,e);      t2 = S0(g) + Maj(g,h,a); b += t1; f = t1 + t2;
     /* round 3 */
@@ -3567,12 +3707,14 @@ __global__ void __launch_bounds__(256,2) qsb_root_group_finish(
             pin_u2ry_words[0],pin_u2ry_words[1],pin_u2ry_words[2],pin_u2ry_words[3],0
 #endif
         };
+#if QSB_WROOT_DBL
+        _ModAdd256(b,b,b);
+#endif
         uint64_t weighted[5];qsb_field_mul(weighted,r,b);
         #pragma unroll
         for(int k=0;k<4;k++)roots[((size_t)count+i)*4u+k]=weighted[k];
     }
 }
-
 
 #if QSB_SUBPIPE
 /* QSB_ROOT_FUSED (sub-batch pipeline): the three root kernels of one sub-batch as one CTA.
@@ -3714,6 +3856,9 @@ __global__ void __launch_bounds__(QSB_RF_LANES,1) qsb_root_fused(uint64_t *roots
         pin_u2ry_words[0],pin_u2ry_words[1],pin_u2ry_words[2],pin_u2ry_words[3],0
 #endif
     };
+#if QSB_WROOT_DBL
+    _ModAdd256(b,b,b);
+#endif
     #pragma unroll 1
     for(int k=K-1;k>=0;k--){
         const int i=k*N+tid;
@@ -3815,7 +3960,6 @@ __device__ __forceinline__ uint32_t qsb_xyzz_finish_precomputed(
     parities |= (uint32_t)(((s[0] & 1ULL) ^ 1ULL) << 1);
     return parities;
 }
-
 
 /* The canonical pinning tail has one sequence-dependent block followed by
  * an 11-byte locktime-dependent tail. Host code hashes the first block once
@@ -4014,7 +4158,7 @@ __device__ __forceinline__ void qsb_po_store(ulonglong2 *saved, const uint64_t *
  * the same 33-byte message and H0 gate, mirroring the GPU's recid-0-first early exit, and publish
  * through the same exact OpenSSL gate. A null plane (runtime fallback) hashes on the GPU as before. */
 #ifndef QSB_HOST_PKSHA
-#define QSB_HOST_PKSHA 4
+#define QSB_HOST_PKSHA 0
 #endif
 /* QSB_PK_YIELD (kill switch, default 1): when a batch's plane still holds an unfinished host job
  * (the host workers are behind), the feeder no longer waits for, or helps with, that job: the
@@ -4122,13 +4266,37 @@ __global__ void __launch_bounds__(STAGE == 0 ? QSB_S0_THREADS : QSB_S2_THREADS,
         uint32_t u0, w1;
         {
             const uint32_t bid = blockIdx.x;
+#if QSB_AB_B0CONST
+
+            u0 = pin_tail_words[0] | (start_lt & 0xffu);
+            w1 = __byte_perm((start_lt >> 8) + (bid << 5) + ab_lane, pin_tail_words[1], 0x0124);
+#else
             u0 = pin_tail_words[0] | ((bid & 7u) << 5);
             w1 = __byte_perm((start_lt >> 8) + (bid >> 3), pin_tail_words[1], 0x0124);
+#endif
         }
         uint4 *ab_sw = (uint4 *)((char *)qsb_digit_arena() + QSB_AB_SW_OFF);
         if (ab_warp == 0)
             qsb_ab_schedule_store(ab_lane, u0, w1, pin_tail_words[2], tp.v[5], ab_sw);
         __syncthreads();   /* warps 1-3 read what warp 0 stored */
+#if QSB_AB_B0CONST
+
+        qsb_ab_slot_t ab_slot;
+        {
+#if QSB_AB_SLOT_V4
+            const uint4 *src = (const uint4 *)d_midstate + ab_warp * (uint32_t)(sizeof(qsb_ab_slot_t) / 16);
+            uint4 *dst = (uint4 *)&ab_slot;
+            #pragma unroll
+            for (int i = 0; i < (int)(sizeof(qsb_ab_slot_t) / 16); i++) dst[i] = __ldg(src + i);
+#else
+            const uint32_t *src = d_midstate + ab_warp * (uint32_t)(sizeof(qsb_ab_slot_t) / 4);
+            uint32_t *dst = (uint32_t *)&ab_slot;
+            #pragma unroll
+            for (int i = 0; i < (int)(sizeof(qsb_ab_slot_t) / 4); i++) dst[i] = __ldg(src + i);
+#endif
+        }
+        const qsb_tail_pre &ab_tp = ab_slot.tp;
+#else
         /* The launch's four sequences' precomputes, one qsb_tail_pre per warp (host: d_mid_slot). */
         qsb_tail_pre ab_tp;
         {
@@ -4137,6 +4305,7 @@ __global__ void __launch_bounds__(STAGE == 0 ? QSB_S0_THREADS : QSB_S2_THREADS,
             #pragma unroll
             for (int i = 0; i < (int)(sizeof(qsb_tail_pre) / 4); i++) dst[i] = __ldg(src + i);
         }
+#endif
         (void)lt;
 #elif QSB_UNIF_DP & 1
         uint32_t u0, w1;
@@ -4153,7 +4322,11 @@ __global__ void __launch_bounds__(STAGE == 0 ? QSB_S0_THREADS : QSB_S2_THREADS,
         _SHA256TransformFastTail11S(state, w0, w2, tp, sa, sb);
 #elif QSB_ASICBOOST
         (void)w2;
+#if QSB_AB_B0CONST
+        _SHA256TransformFastTail11AB(state, ab_lane, u0, w1, ab_tp, ab_sw, ab_slot.r01);
+#else
         _SHA256TransformFastTail11AB(state, ab_lane, u0, w1, ab_tp, ab_sw);
+#endif
 #elif QSB_TAIL_PRE && QSB_SHA_OPT && (QSB_UNIF_DP & 1)
         _SHA256TransformFastTail11U(state, (uint32_t)threadIdx.x, u0, w1, w2, tp);
 #elif QSB_TAIL_PRE && QSB_SHA_OPT
@@ -4247,6 +4420,18 @@ __global__ void __launch_bounds__(STAGE == 0 ? QSB_S0_THREADS : QSB_S2_THREADS,
     _FixedBaseSignedXYZZScalar(qx,qy,qzz,qzzz,z,d_gt,qsb_prepare_scratch(),ya,rq);
     /*PO_BEGIN*/
     qsb_yoff_to_y(ya);
+#if QSB_STATE_LNUM
+    {
+        const uint64_t w[4]={
+#if QSB_ISO_XR
+            pin_iso_u2ry_words[0],pin_iso_u2ry_words[1],pin_iso_u2ry_words[2],pin_iso_u2ry_words[3]
+#else
+            pin_u2ry_words[0],pin_u2ry_words[1],pin_u2ry_words[2],pin_u2ry_words[3]
+#endif
+        };
+        _ModAddLazy(ya,ya,w);
+    }
+#endif
     qsb_muladd2_exact(qy,ya,qzzz,qy,rq);
     qsb_po_denominator<0>(qx,qzz,qzzz,prod);
     usable=active&&((prod[0]|prod[1]|prod[2]|prod[3])!=0);
@@ -4832,7 +5017,8 @@ static int qsb_subpipe_init(cudaStream_t like) {
     const int groups = (blocks + 255) / 256;
     for (int r = 0; r < QSB_SUBRING && e == cudaSuccess; r++) {
         e = cudaMalloc(&P.state[r], (size_t)QSB_SUBPIPE * QSB_STATE_PLANES * sizeof(ulonglong2));
-        if (e == cudaSuccess) e = cudaMalloc(&P.roots[r], (size_t)blocks * 8u * sizeof(uint64_t));
+
+        if (e == cudaSuccess) e = cudaMalloc(&P.roots[r], (size_t)(blocks < 1024 ? 1024 : blocks) * 8u * sizeof(uint64_t));
         if (e == cudaSuccess) e = cudaMalloc(&P.super_roots[r], (size_t)groups * 4u * sizeof(uint64_t));
         if (e == cudaSuccess) e = cudaMalloc(&P.ckpt[r], (size_t)groups * 4u * QSB_CHECKPOINT_STRIDE * sizeof(uint64_t));
         if (e == cudaSuccess) e = cudaEventCreateWithFlags(&P.ev_s0[r], cudaEventDisableTiming);
@@ -4913,7 +5099,11 @@ static void qsb_subpipe_launch(
 #if QSB_ASICBOOST
         /* a host batch is QSB_AB_K sequences x batch_size/QSB_AB_K locktimes, 128-candidate
          * blocks of 32 locktimes each: candidate off starts locktime off/QSB_AB_K */
+#if QSB_AB_B0CONST
+        const uint32_t lt0 = start_lt + (((uint32_t)off / QSB_AB_K) << 8);
+#else
         const uint32_t lt0 = start_lt + (uint32_t)off / QSB_AB_K;
+#endif
 #else
         const uint32_t lt0 = start_lt + (uint32_t)off;
 #endif
@@ -5243,7 +5433,6 @@ __global__ void kernel_build_gtable(
     gt_build_one(t, d_L, d_H, gTable);
 #endif
 }
-
 
 /* ============================================================
  * Host code
@@ -5910,12 +6099,12 @@ static int qsb_gate_accept(const pinning2_params_t *pp, uint32_t seq, uint32_t l
 #include <sched.h>
 #include <unistd.h>
 #include "cg_sha.h"
-/* Host side of QSB_HOST_PKSHA. One job per mapped plane (2*QSB_SLOTS planes: batch b writes
- * plane b % NB, posted when its slot completes and collected before batch b+NB reuses it).
- * Workers and the waiting main thread claim records through a CAS on (job tag << 32 | next),
- * so a worker that lags behind a re-posted plane can never claim from the wrong job. */
+
+#ifndef QSB_PK_DEPTH
+#define QSB_PK_DEPTH 1
+#endif
 namespace qsb_pk {
-static const int NB = 2 * QSB_SLOTS;
+static const int NB = (QSB_PK_DEPTH ? 4 : 2) * QSB_SLOTS;
 static const uint32_t CH = 2;   /* records per claim */
 struct alignas(64) Job {
     std::atomic<uint64_t> ctl{0};
@@ -5940,7 +6129,11 @@ static int ok = 0, mode = 0; /* mode: 2 = SHA-NI, 1 = AVX2, 0 = scalar */
 #ifndef QSB_PK_AUTOTUNE
 #define QSB_PK_AUTOTUNE 1
 #endif
-static int admit_enabled=1, calibrating=0, ec_env_added=0;
+
+#ifndef QSB_PK_SHARE_TUNE
+#define QSB_PK_SHARE_TUNE 1
+#endif
+static int admit_enabled=1, calibrating=0, ec_env_added=0, admit_stride=1;
 static std::atomic<int> workers_parked{0};
 static uint64_t gpu_finished=0;
 static double quota_cpus() {
@@ -5956,7 +6149,6 @@ static double quota_cpus() {
         if(q>0&&per>0)return (double)q/(double)per;
     }return -1.;
 }
-
 
 static inline void message(uint32_t w[16], const uint64_t *x, uint32_t prefix) {
     uint32_t s[8];
@@ -6006,7 +6198,49 @@ static void hash2_ni(const uint32_t m0[16], const uint32_t m1[16], uint32_t *h0,
     qcg_sha::shani_compress2(s0, m0, s1, m1);
     *h0 = s0[0]; *h1 = s1[0];
 }
+
+#ifndef QSB_PK_NI4
+#define QSB_PK_NI4 1
+#endif
+#if QSB_PK_NI4
+__attribute__((target("sha,sse4.1"), noinline))
+static void hash4_ni(const uint32_t m[4][16], uint32_t h[4]) {
+    qcg_sha::shani_h0_4(m[0], m[1], m[2], m[3], h);
+}
+static void hash_record_ni4(Job &J, uint32_t j) {
+    const uint8_t *rec = J.plane + (size_t)j * QSB_PK_REC;
+    const uint32_t *yp = (const uint32_t *)(rec + 64u * QSB_PK_LANES);
+    const uint32_t base = (j * (uint32_t)QSB_HOST_PKSHA + (uint32_t)QSB_HOST_PKSHA - 1u) * (uint32_t)QSB_PK_LANES;
+    uint32_t m[4][16], lane[2], h[4];
+    int n = 0;
+    for (int l = 0; l < QSB_PK_LANES; l++) {
+        const uint32_t y = yp[l];
+        if (y == 0u || base + (uint32_t)l >= J.batch_sz) continue;
+        uint64_t x0[4], x1[4];
+        lane_keys(rec, l, x0, x1);
+        message(m[2 * n], x0, prefix_of(y, 0));
+        message(m[2 * n + 1], x1, prefix_of(y, 1));
+        lane[n++] = base + (uint32_t)l;
+        if (n < 2) continue;
+        hash4_ni(m, h);
+        for (int k = 0; k < 2; k++) {
+            if (h0_hit(h[2 * k])) record_hit(J, lane[k]);
+            else if (h0_hit(h[2 * k + 1])) record_hit(J, lane[k] | (1u << 30));
+        }
+        n = 0;
+    }
+    if (n) {
+        memcpy(m[2], m[0], sizeof m[0]); memcpy(m[3], m[1], sizeof m[1]);
+        hash4_ni(m, h);
+        if (h0_hit(h[0])) record_hit(J, lane[0]);
+        else if (h0_hit(h[1])) record_hit(J, lane[0] | (1u << 30));
+    }
+}
+#endif
 static void hash_record(Job &J, uint32_t j) {
+#if QSB_PK_NI4
+    if (mode == 2) { hash_record_ni4(J, j); return; }
+#endif
     const uint8_t *rec = J.plane + (size_t)j * QSB_PK_REC;
     const uint32_t *yp = (const uint32_t *)(rec + 64u * QSB_PK_LANES);
     const uint32_t base = (j * (uint32_t)QSB_HOST_PKSHA + (uint32_t)QSB_HOST_PKSHA - 1u) * (uint32_t)QSB_PK_LANES;
@@ -6208,7 +6442,7 @@ static void post(uint64_t bno, uint32_t batch_sz, uint32_t seq, uint32_t lt) {
 static int collect(uint64_t bno, uint32_t &seq, uint32_t &lt, uint32_t &count, uint32_t *hits) {
     count = 0;
     const int b = (int)(bno % NB);
-    given[b] = (uint8_t)(ok && admit_enabled);
+    given[b] = (uint8_t)(ok && admit_enabled && (admit_stride==1 || bno%(uint64_t)admit_stride==0));
     if (!ok || !owner[b]) return 0;
     Job &J = jobs[b];
 #if QSB_PK_YIELD
@@ -6246,7 +6480,6 @@ static uint64_t completed_candidates() {
 }
 } /* namespace qsb_pk */
 #endif
-
 
 int main(int argc, char **argv) {
     uint32_t tail_w2 = 0;   /* W2 of the static tail block (QSB_TAIL_PRE) */
@@ -6763,7 +6996,11 @@ int main(int argc, char **argv) {
     uint32_t *h_mid=NULL;
 #if QSB_ASICBOOST
     /* per slot: the host batch's QSB_AB_K sequence precomputes (the kernel's d_midstate) */
+#if QSB_AB_B0CONST
+    const size_t mid_words = QSB_AB_K * (sizeof(qsb_ab_slot_t) / 4);
+#else
     const size_t mid_words = QSB_AB_K * (sizeof(qsb_tail_pre) / 4);
+#endif
 #else
     const size_t mid_words = 8;
 #endif
@@ -7109,7 +7346,12 @@ int main(int argc, char **argv) {
 #if QSB_ASICBOOST
                     /* candidate hi: block hi>>7 (32 locktimes), warp (hi>>5)&3 = sequence
                      * base_seq + warp*effective_total, lane hi&31 */
+#if QSB_AB_B0CONST
+
+                    const uint32_t lt = base_lt + ((((hi >> 7) << 5) + (hi & 31u)) << 8);
+#else
                     const uint32_t lt = base_lt + ((hi >> 7) << 5) + (hi & 31u);
+#endif
                     const uint32_t hs = base_seq + ((hi >> 5) & (uint32_t)(QSB_AB_K - 1)) * (uint32_t)effective_total;
 #else
                     const uint32_t lt = base_lt + hi;
@@ -7197,8 +7439,9 @@ int main(int argc, char **argv) {
     };
     unsigned pk_phase=0;
     const int pk_modes[8]={0,1,1,0,1,0,0,1}; /* ABBA then BAAB */
+    const int pk_smodes[8]={1,2,2,1,2,1,1,2};
     uint64_t pk_epoch_begin=0;
-    double pk_rates[8]={0,0,0,0,0,0,0,0};
+    double pk_rates[16]={0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0};
     bool pk_measuring=false;
     struct timespec pk_epoch_t0;
     clock_gettime(CLOCK_MONOTONIC,&pk_epoch_t0);
@@ -7245,9 +7488,27 @@ int main(int argc, char **argv) {
         /* Search all safe locktimes for this sequence group: BATCH candidates are
          * BATCH/QSB_SEQ_GROUP locktimes of each of the group's sequences. */
         const uint32_t batch_lts = (uint32_t)BATCH / QSB_SEQ_GROUP;
+#if QSB_AB_B0CONST
+
+        uint32_t ab_hn = (lt_range / 256u) & ~31u;
+#if QSB_AB_WHOLE_BATCH
+        if (ab_hn >= batch_lts) ab_hn -= ab_hn % batch_lts;
+#endif
+        qsb_ab_slot_t grp_slot[QSB_SEQ_GROUP];
+        memset(grp_slot, 0, sizeof(grp_slot));
+        for (uint32_t ab_b0 = 0; ab_b0 < 256u; ab_b0++) {
+        for (int k = 0; k < QSB_SEQ_GROUP; k++) {
+            grp_slot[k].tp = grp_tp[k];
+            grp_slot[k].r01 = qsb_tail_r01(grp_tp[k], tail_w0 | ab_b0);
+        }
+        for (uint32_t lt_off = 0; lt_off < ab_hn; lt_off += batch_lts) {
+            uint32_t batch_lt = LT_MIN + (lt_off << 8) + ab_b0;
+            int batch_sz = QSB_SEQ_GROUP * (int)((lt_off + batch_lts <= ab_hn) ? batch_lts : (ab_hn - lt_off));
+#else
         for (uint32_t lt_off = 0; lt_off < lt_range; lt_off += batch_lts) {
             uint32_t batch_lt = LT_MIN + lt_off;
             int batch_sz = QSB_SEQ_GROUP * (int)((lt_off + batch_lts <= lt_range) ? batch_lts : (lt_range - lt_off));
+#endif
             int s = (int)(batch_no % (uint64_t)QSB_SLOTS);
             batch_no++;
 #if QSB_REFILL_BEFORE_GATE
@@ -7267,9 +7528,15 @@ int main(int argc, char **argv) {
 #endif
 
 #if QSB_ASICBOOST
+#if QSB_AB_B0CONST
+            memcpy(h_mid + (size_t)s*mid_words, grp_slot, sizeof(grp_slot));
+            cudaError_t slot_error = cudaMemcpyAsync(
+                d_mid_slot[s], h_mid + (size_t)s*mid_words, sizeof(grp_slot), cudaMemcpyHostToDevice, st);
+#else
             memcpy(h_mid + (size_t)s*mid_words, grp_tp, sizeof(grp_tp));
             cudaError_t slot_error = cudaMemcpyAsync(
                 d_mid_slot[s], h_mid + (size_t)s*mid_words, sizeof(grp_tp), cudaMemcpyHostToDevice, st);
+#endif
 #elif !QSB_TAIL_PRE || !QSB_SKIP_UNUSED_MIDSTATE
             memcpy(h_mid + (size_t)s*mid_words, cur_mid, 32);
             cudaError_t slot_error = cudaMemcpyAsync(
@@ -7369,14 +7636,24 @@ int main(int argc, char **argv) {
                            pk_phase,qsb_pk::admit_enabled,(unsigned long long)work,sec,
                            (unsigned long long)qsb_pk::pending_candidates(),pk_rates[pk_phase]);
                     ++pk_phase;
-                    if(pk_phase==8) {
+                    if(pk_phase==16) {
+                        const double log_gain=(log(pk_rates[9])+log(pk_rates[10])-log(pk_rates[8])-log(pk_rates[11])
+                                              +log(pk_rates[12])+log(pk_rates[15])-log(pk_rates[13])-log(pk_rates[14]))*0.25;
+                        qsb_pk::admit_stride=log_gain>log(1.001)?2:1;
+                        qsb_pk::calibrating=0;
+                        printf("  Host SHA share autotune: half-share gain=%+.5f%% stride=%d\n",
+                               100.*expm1(log_gain),qsb_pk::admit_stride);
+                    } else if(pk_phase>8) {
+                        qsb_pk::admit_stride=pk_smodes[pk_phase-8];pk_measuring=false;
+                    } else if(pk_phase==8) {
                         const double log_gain=(log(pk_rates[1])+log(pk_rates[2])-log(pk_rates[0])-log(pk_rates[3])
                                               +log(pk_rates[4])+log(pk_rates[7])-log(pk_rates[5])-log(pk_rates[6]))*0.25;
                         qsb_pk::admit_enabled=0; /* Future admissions only; accepted snapshots still post. */
                         for(int ds=0;ds<QSB_SLOTS;ds++)if(drain_slot(ds))return 1;
                         if(drain_pk_owners())return 1;
                         qsb_pk::admit_enabled=log_gain>log(1.001);
-                        qsb_pk::calibrating=0;
+                        qsb_pk::calibrating=QSB_PK_SHARE_TUNE && qsb_pk::admit_enabled;
+                        if(qsb_pk::calibrating){qsb_pk::admit_stride=pk_smodes[0];pk_measuring=false;}
                         if(!qsb_pk::admit_enabled) {
                             qsb_pk::workers_parked.store(1,std::memory_order_release);
                             if(qsb_pk::ec_env_added){unsetenv("QSB_COGRIND_THREADS");qsb_pk::ec_env_added=0;}
@@ -7406,6 +7683,9 @@ int main(int argc, char **argv) {
                 }
             }
         }
+#if QSB_AB_B0CONST
+        }
+#endif
 
         /* slot_seq/slot_lt remain attached to the old batch until its done
          * event is synchronized on reuse. cur_tp is passed to the kernel by
