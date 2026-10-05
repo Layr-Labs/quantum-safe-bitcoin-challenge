@@ -5916,7 +5916,13 @@ static int qsb_gate_accept(const pinning2_params_t *pp, uint32_t seq, uint32_t l
  * so a worker that lags behind a re-posted plane can never claim from the wrong job. */
 namespace qsb_pk {
 static const int NB = 2 * QSB_SLOTS;
-static const uint32_t CH = 2;   /* records per claim */
+#ifndef QSB_PK_CH
+#define QSB_PK_CH 8 /* isolated host claim batching; literal control uses 2 */
+#endif
+#if QSB_PK_CH != 2 && QSB_PK_CH != 8
+#error "QSB_PK_CH is restricted to the reviewed 2/8-record claims"
+#endif
+static const uint32_t CH = QSB_PK_CH;   /* records per claim */
 struct alignas(64) Job {
     std::atomic<uint64_t> ctl{0};
     std::atomic<uint32_t> done{0};
