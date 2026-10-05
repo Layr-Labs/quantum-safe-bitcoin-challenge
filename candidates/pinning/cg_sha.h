@@ -191,7 +191,7 @@ static QSB_SHA_AVX2 void s8_compress_plan(v8u out[8], const v8u *Wv, const s8_pl
     static_assert(VM & 1, "round 0 folding needs a varying word 0");
     constexpr uint64_t V = s8_varmask(VM);
     static_assert((V >> 16) == (~0ull >> 16), "every schedule word must depend on the message");
-    v8u W[64], KW[64];
+    v8u W[64]; v8u *const KW = W; /* All schedule dependencies precede destructive K+W conversion. */
     for (int j = 0; j < 16; j++) if ((V >> j) & 1) W[j] = Wv[j];
     /* W16..W31 with the constant terms folded (compile-time structure) */
 #define S8P_W(t) do {                                                                                     \
@@ -257,8 +257,8 @@ s9_compress_plan(v8u out[8], const v8u *Wv, uint32_t sout[8], const uint32_t *Sv
     static_assert(VM & 1, "round 0 folding needs a varying word 0");
     constexpr uint64_t V = s8_varmask(VM);
     static_assert((V >> 16) == (~0ull >> 16), "every schedule word must depend on the message");
-    v8u W[64], KW[64];
-    uint32_t SW[64], SKW[64];
+    v8u W[64]; v8u *const KW = W; /* All schedule dependencies precede destructive K+W conversion. */
+    uint32_t SW[64]; uint32_t *const SKW = SW; /* Word zero stays raw for folded round zero. */
     for (int j = 0; j < 16; j++) { if ((V >> j) & 1) W[j] = Wv[j]; SW[j] = ((V >> j) & 1) ? Sv[j] : 0u; }
 #define S8P_W(t) do {                                                                                     \
         v8u acc_; int has_ = 0;                                                                           \
