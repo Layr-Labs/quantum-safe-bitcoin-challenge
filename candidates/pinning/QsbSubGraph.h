@@ -33,8 +33,8 @@ namespace qsb_sg {
 struct Ring {
     cudaGraph_t graph = nullptr;
     cudaGraphExec_t exec = nullptr;
-    cudaGraphNode_t prepare = nullptr, root = nullptr, finish = nullptr;
-    CUDA_KERNEL_NODE_PARAMS_v2 pp = {}, rp = {}, fp = {};
+    cudaGraphNode_t prepare = nullptr, root = nullptr, finish = nullptr, chord = nullptr;
+    CUDA_KERNEL_NODE_PARAMS_v2 pp = {}, rp = {}, fp = {}, cp = {};
     cudaStream_t stream = nullptr;
     cudaEvent_t done = nullptr;
     int root_count = 0;
@@ -106,10 +106,15 @@ static bool init(const cudaStream_t prepare[2], const cudaStream_t root[2], cons
 static void instantiate(Ring &g, int count) {
     size_t n = 0;
     check(cudaGraphGetNodes(g.graph, nullptr, &n), "node count");
+#if QSB_LAST_CHORD == 1
+    if (n != 4) { fprintf(stderr, "Subgraph expected four kernel nodes, got %zu\n", n); exit(2); }
+    cudaGraphNode_t nodes[4];
+#else
     if (n != 3) { fprintf(stderr, "Subgraph expected three kernel nodes, got %zu\n", n); exit(2); }
     cudaGraphNode_t nodes[3];
+#endif
     check(cudaGraphGetNodes(g.graph, nodes, &n), "nodes");
-    for (int i = 0; i < 3; i++) {
+    for (size_t i = 0; i < n; i++) {
         cudaGraphNodeType type;
         check(cudaGraphNodeGetType(nodes[i], &type), "node type");
         if (type != cudaGraphNodeTypeKernel) { fprintf(stderr, "Subgraph unexpected node type\n"); exit(2); }
@@ -121,15 +126,29 @@ static void instantiate(Ring &g, int count) {
         check(cudaGraphNodeGetDependencies(nodes[i], nullptr, &before), "dependencies");
         check(cudaGraphNodeGetDependentNodes(nodes[i], nullptr, &after), "dependents");
 #endif
+        CUDA_KERNEL_NODE_PARAMS_v2 tmp = {};
+        driver_check(get_params((CUgraphNode)nodes[i], &tmp), "node parameters");
         if (!before && after == 1) g.prepare = nodes[i];
         else if (before == 1 && !after) g.finish = nodes[i];
-        else if (before == 1 && after == 1) g.root = nodes[i];
+        else if (before == 1 && after == 1 && tmp.gridDimX == 1) g.root = nodes[i];
+#if QSB_LAST_CHORD == 1
+        else if (before == 1 && after == 1) g.chord = nodes[i];
+#endif
         else { fprintf(stderr, "Subgraph unexpected topology\n"); exit(2); }
     }
     if (!g.prepare || !g.root || !g.finish) { fprintf(stderr, "Subgraph incomplete chain\n"); exit(2); }
+#if QSB_LAST_CHORD == 1
+    if (!g.chord) { fprintf(stderr, "Subgraph missing last-chord node\n"); exit(2); }
+#endif
     driver_check(get_params((CUgraphNode)g.prepare, &g.pp), "prepare parameters");
     driver_check(get_params((CUgraphNode)g.root, &g.rp), "root parameters");
     driver_check(get_params((CUgraphNode)g.finish, &g.fp), "finish parameters");
+#if QSB_LAST_CHORD == 1
+    driver_check(get_params((CUgraphNode)g.chord, &g.cp), "chord parameters");
+    if (!g.cp.kern || g.cp.ctx != contexts[2]) {
+        fprintf(stderr, "Subgraph capture changed kernel execution context\n"); exit(2);
+    }
+#endif
     CUDA_KERNEL_NODE_PARAMS_v2 *p[3] = {&g.pp, &g.rp, &g.fp};
     for (int i = 0; i < 3; i++) {
         if (!p[i]->kern || p[i]->ctx != contexts[i]) {

@@ -30,6 +30,9 @@ static bool qsb_register_startup_check(uint64_t *device, cudaStream_t stream) {
            BN_lebin2bn((const unsigned char*)scale_words,32,scale)!=nullptr &&
            BN_lebin2bn((const unsigned char*)weight_words,32,weight)!=nullptr;
     }
+#if QSB_WROOT_DBL
+    ok=ok&&BN_mod_add(weight,weight,weight,p,ctx);
+#endif
     /* First 64 products are the complete 8x8 edge Cartesian product; remaining */
     // 192 use deterministic full-width values. Compare every result to OpenSSL.
     if(ok&&error==cudaSuccess){
@@ -70,7 +73,8 @@ static bool qsb_register_startup_check(uint64_t *device, cudaStream_t stream) {
     const int counts[]={1,31,32,33,63,64,65,95,96,97,127,128,129,255,256,257,511,512,513,557,767,768,769,1023,1024};
     for(int case_id=0;case_id<(int)(sizeof(counts)/sizeof(counts[0]))+4;++case_id){
         const int mixed=(int)(sizeof(counts)/sizeof(counts[0]));
-        const int count=case_id<mixed?counts[case_id]:(case_id&1?1024:1);
+        const int count=case_id<mixed?counts[case_id]:(case_id&1?QSB_RROOT_CAP:1);
+        if(count>QSB_RROOT_CAP)continue;
         if(!ok||error!=cudaSuccess)break;
         memset(raw,0,words*sizeof(uint64_t));
         for(int i=0;i<count;++i){
