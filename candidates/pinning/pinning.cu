@@ -8,7 +8,7 @@
 #endif
 /* l2state variant fkF20c8 + split retry */
 #ifndef QSB_SUB_FINE
-#define QSB_SUB_FINE 1
+#define QSB_SUB_FINE 0 /* native 131072-candidate sub-batches with the matching fused K8 carrier */
 #endif
 #if QSB_SUB_FINE
 #define QSB_SUBPIPE 65536
@@ -7296,6 +7296,7 @@ int main(int argc, char **argv) {
     uint32_t cur_mid[8];
     for (int s = 0; s < QSB_SLOTS; s++) slot_busy[s] = 0;
     uint64_t batch_no = 0;
+    FILE *gpu_hit_file = nullptr;
 #if QSB_REFILL_BEFORE_GATE
     auto publish_hits = [&](uint32_t hit_seq, uint32_t hit_lt,
                             uint32_t h_hit, const uint32_t *hits) -> int {
@@ -7324,11 +7325,16 @@ int main(int argc, char **argv) {
 #endif
         if (h_hit > 0) {
             int nh = (h_hit > 64) ? 64 : (int)h_hit;
-            mkdir("results", 0755);
-            char fname[256];
-            snprintf(fname, sizeof(fname), "results/pinning_hit_%d.txt", gpu_index);
-            FILE *f = fopen(fname, "a");
+            if (!gpu_hit_file) {
+                mkdir("results", 0755);
+                char fname[256];
+                snprintf(fname, sizeof(fname), "results/pinning_hit_%d.txt", gpu_index);
+                gpu_hit_file = fopen(fname, "a");
+            }
+            FILE *f = gpu_hit_file;
             int wrote = 0;
+            char hit_lines[64 * 64];
+            size_t hit_lines_len = 0;
             if (f) {
                 for (int h = 0; h < nh; h++) {
                     uint32_t raw = hits[h];
@@ -7365,10 +7371,21 @@ int main(int argc, char **argv) {
                                          gate_grp, gate_ctx, gate_order, gate_nri, gate_R);
                     if (ri < 0) continue;
 #endif
-                    fprintf(f, "sequence=%u locktime=%u recid=%d\n", hs, lt, ri);
+                    const int line_len = snprintf(hit_lines + hit_lines_len,
+                                                  sizeof(hit_lines) - hit_lines_len,
+                                                  "sequence=%u locktime=%u recid=%d\n",
+                                                  hs, lt, ri);
+                    if (line_len <= 0 || (size_t)line_len >= sizeof(hit_lines) - hit_lines_len) {
+                        fprintf(stderr, "Hit output formatting failed\n");
+                        return 1;
+                    }
+                    hit_lines_len += (size_t)line_len;
                     wrote = 1;
                 }
-                fclose(f);
+                if (wrote) {
+                    fwrite(hit_lines, 1, hit_lines_len, f);
+                    fflush(f);
+                }
             }
             if (wrote) found = 1;
         }
@@ -7668,7 +7685,7 @@ int main(int argc, char **argv) {
 #endif
 
             /* Check if another GPU found it */
-            if ((total_searched % (50*1024*1024)) < (uint64_t)BATCH) {
+            if (num_gpus > 1 && (total_searched % (50*1024*1024)) < (uint64_t)BATCH) {
                 char check[256];
                 for (int g = 0; g < num_gpus; g++) {
                     if (g == gpu_index) continue;
@@ -7703,6 +7720,7 @@ int main(int argc, char **argv) {
                    gpu_index, seqs_done, seq, total_searched/1000000, rate/1e6, elapsed);
         }
     }
+    if (gpu_hit_file) fclose(gpu_hit_file);
 #else
 #if QSB_ASICBOOST
 #error "QSB_ASICBOOST groups sequences in the slotted batch loop (QSB_SLOTPIPE)"
@@ -7811,7 +7829,7 @@ int main(int argc, char **argv) {
             }
 
             /* Check if another GPU found it */
-            if ((total_searched % (50*1024*1024)) < (uint64_t)BATCH) {
+            if (num_gpus > 1 && (total_searched % (50*1024*1024)) < (uint64_t)BATCH) {
                 char check[256];
                 for (int g = 0; g < num_gpus; g++) {
                     if (g == gpu_index) continue;
