@@ -118,6 +118,14 @@ static int nvml_open(Nvml &n, const char *pci) {
     return 0;
 }
 
+/* ---- thermal streak (QSB_RT_THERMAL in tree.cu) ----
+ * Consecutive 1 s samples whose NVML clock-event reasons include one of QSB_RT_THERMAL_MASK (default: SW thermal slowdown
+ * 0x20 and HW thermal slowdown 0x40). Written by the sampler only, read by the GPU host thread; 0 when NVML is not usable. */
+#ifndef QSB_RT_THERMAL_MASK
+#define QSB_RT_THERMAL_MASK 0x60ull
+#endif
+static std::atomic<int> g_therm_streak{0};
+
 /* ---- sampler ---- */
 typedef uint64_t (*count_fn)();
 typedef int (*stop_fn)();
@@ -146,6 +154,8 @@ static void start(count_fn gpu, count_fn cpu, stop_fn stop, const char *pci) {
                 if (n.power(n.dev, &v) == 0) s.power_w = (unsigned)((v + 500) / 1000);
                 if (n.temp(n.dev, 0 /* NVML_TEMPERATURE_GPU */, &v) == 0) s.temp_c = v;
                 if (n.reasons && n.reasons(n.dev, &r) == 0) s.reasons = reason_bits(r);
+                if (r & (unsigned long long)(QSB_RT_THERMAL_MASK)) g_therm_streak.fetch_add(1, std::memory_order_relaxed);
+                else g_therm_streak.store(0, std::memory_order_relaxed);
                 if (n.fields) {
                     nvmlFieldValue_t fv; memset(&fv, 0, sizeof fv); fv.fieldId = NVML_FI_DEV_MEMORY_TEMP;
                     if (n.fields(n.dev, 1, &fv) == 0 && fv.nvmlReturn == 0) s.mem_c = (unsigned)(fv.value & 0xffffffffull);
