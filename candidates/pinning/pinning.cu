@@ -8,7 +8,7 @@
 #endif
 /* l2state variant fkF20c8 + split retry */
 #ifndef QSB_SUB_FINE
-#define QSB_SUB_FINE 1
+#define QSB_SUB_FINE 0 /* sub-batch 65536 -> 131072 (K8 fused roots, half the launches): highest self rate 960e87fb */
 #endif
 #if QSB_SUB_FINE
 #define QSB_SUBPIPE 65536
@@ -321,7 +321,7 @@ static_assert(alignof(ulonglong2) == 16, "pipeline vector must be 16-byte aligne
 #error "QSB_QMIX5_COLDPOL must be 0 or 1"
 #endif
 #ifndef QSB_BATCH
-#define QSB_BATCH 4194304    /* candidates per pipeline launch */
+#define QSB_BATCH 2097152    /* candidates per pipeline launch: 2M host batches (best hit ratio 580217f7) */
 #endif
 #ifndef QSB_PREFETCH
 #define QSB_PREFETCH 0        /* 0: none, 1: next chunk one step ahead, 2: all chunks up front */
