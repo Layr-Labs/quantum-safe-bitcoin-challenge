@@ -404,12 +404,23 @@ __device__ __forceinline__ void qsb_scheduled_window_hash_pair(
     if(0)   /* the rolled loop replaces the loop below, which stays in the source as dead code (this form is the
              * measured one; an #else form reorders two moves) */
 #endif
+#if QSB_WINDOW_GROUP_ROUNDS
+    /* Keep a fixed group of rounds inline, and roll between groups. The inner
+     * group always ends on an eight-round state rotation boundary. This uses
+     * all original schedule words once, in their original order. */
+    #pragma unroll 1
+    for(int group=0;group<64;group+=QSB_WINDOW_GROUP_ROUNDS){
+        #pragma unroll
+        for(int offset=0;offset<QSB_WINDOW_GROUP_ROUNDS;offset+=8){
+            const int r=group+offset;
+#else
 #if QSB_PAIR_SHA_UNROLL_WINDOW   /* exact: same rounds, no loop counter, loads can be hoisted */
     #pragma unroll
 #else
     #pragma unroll 1
 #endif
     for(int r=0;r<64;r+=8){
+#endif
 #if QSB_SHA_SCHED_V4
         /* QSB_SHA_SCHED_V4: two 16 B loads carry the 8 rounds' W+K words; the same words in the same order */
         const uint4 wa=QSB_WSEC_V4(r,slot), wb=QSB_WSEC_V4(r+4,slot);
@@ -432,6 +443,9 @@ __device__ __forceinline__ void qsb_scheduled_window_hash_pair(
         {const uint32_t w=QSB_WINDOW_SECOND[r+7][slot];S2Round(b0,c0,d0,e0,f0,g0,h0,a0,0,w);S2Round(b1,c1,d1,e1,f1,g1,h1,a1,0,w);}
 #endif
     }
+#if QSB_WINDOW_GROUP_ROUNDS
+    }
+#endif
     QSB_PAIR_STATE_ADD();
 #if QSB_ROOT_FILL
     }
