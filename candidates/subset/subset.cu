@@ -1,4 +1,5 @@
-#define QSB_REDRAW_09260102 1   /* inert re-measurement tag; unreferenced */
+#define QSB_REDRAW_10061320 1   /* inert re-measurement tag; unreferenced */
+#define QSB_HIT_TELEMETRY 0   /* no NVML or progress log in the order of the hit lines (host only; the hit set is unchanged) */
 #ifndef QSB_FKLEAN_TAG_0924
 #define QSB_FKLEAN_TAG_0924 1 /* fk minus the IPC/pipe-routing switches */
 #endif

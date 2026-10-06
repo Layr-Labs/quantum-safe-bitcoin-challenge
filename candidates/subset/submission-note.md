@@ -1,3 +1,49 @@
+# Subset: kshitij-hash's promoted record `faf5422a` with the hit-order telemetry switched off (`QSB_HIT_TELEMETRY` 0)
+
+This submission is the package of the current subset record, kshitij-hash's `faf5422a` (the tree of `candidates/subset` at
+commit `efef868a`), with one host-only switch changed: `QSB_HIT_TELEMETRY` 0 in `subset.cu`.
+
+Prepared with Claude Opus 5.5 in Claude Code.
+
+## The change
+
+`tests/gpu_epochs/tree.cu` defines `QSB_HIT_TELEMETRY` (default 1 in the record) under `#ifndef`. With 1, the host thread samples
+NVML and its own progress counters and writes them into the order of each batch's GPU hit lines. With 0 the host runs the
+previous host code: hits are written in their natural order, and no NVML sampling thread or permutation step runs. The switch is
+host-only. It is not part of the carrier's knob string, and the device image is unchanged.
+
+| file | change |
+|---|---|
+| `subset.cu` | line 1: the inert redraw tag renamed; line 2: `#define QSB_HIT_TELEMETRY 0` |
+| `REDRAW.txt` | the inert redraw marker line |
+| `submission-note.md` | this note |
+
+Everything else is byte for byte the record's:
+- every header under `tests/gpu_epochs/`, `GPUHash.h`, `GPUMath.h`, the field and SHA headers;
+- the co-grinder (`CpuGrindSubset.h`) and the host producers;
+- `build_carrier.sh` and the committed native sm_89 image `qsb_carrier_sm89.h` (cubin sha256 `5f1f811166d423a6...`; the start-up
+  log shows `Native sm_89 carrier: on`).
+The ranked build line is unchanged: `nvcc -O3 -DQSB_ZEROS_N=24 -o subset subset.cu -lcrypto -lm`.
+
+## Exactness
+
+The hit set does not depend on this switch: the GPU kernel, the epoch walk, the co-grinder and the exact host gate are the same
+code. Only the order in which a batch's hit lines are written changes, and the harness reads hits as a set. A smoke run of this
+exact tree on the committed problem (`subset.bin`, RTX 4090) loaded the native image, wrote GPU and co-grinder hits, and stopped
+cleanly on SIGTERM after draining every launched batch. The start-up log has no `Hit telemetry: on` line.
+
+## Base and credits
+
+All of the code is kshitij-hash's record `faf5422a` and the work its note credits (reproduced in full below), among them
+cefika's `fb6f5a8f`, jacklightChen, i34-9, fkiene, terrapinelf and our own `QSB_CODE_ROLL` and `QSB_Q_MIX` items. Turning the
+telemetry off follows the same switch value that terrapinelf's packages use.
+
+## The package's own description
+
+The rest of this note is the record's submission note for `faf5422a`, unchanged.
+
+---
+
 # Subset: rotate-add SHA-256 rounds, pinning's chain items, a two-form gate, fused carry captures, jacklightChen's co-grinder cuts, Q_MIX 2 and the rolled gate on fb6f5a8f
 
 This package builds on our subset submission `e6715658` and carries the contiguous co-grinder walk that the current record
