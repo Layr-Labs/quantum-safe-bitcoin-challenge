@@ -341,7 +341,7 @@ static_assert(QSB_CPU_BATCH_SOLO % 32 == 0 && QSB_CPU_BATCH_SOLO >= 32 && QSB_CP
  * (about 20 uops each on Zen 4). The same 16 x 8 words end in the same zw[] registers (
  * derives and checks the index vectors), so digits, bad flags and hits are unchanged. 0 = the gathers. */
 #ifndef QSB_CPU_RECODE_NG
-#define QSB_CPU_RECODE_NG 1
+#define QSB_CPU_RECODE_NG 0
 #endif
 /*: three host-only switches on the 8-lane path, each
  * default 0 (or 4) = the code above byte for byte in behaviour, for a per-core Zen 4 SMT A/B (bench/r2d.sh). None changes a field
