@@ -18,7 +18,7 @@
 #define QSB_SUBRING 4 /* SUBRING 4 + SLOTS 5: host pipeline depth measured on intel-r5 (ercumentyildirim 127d95d4) */
 #define QSB_ROOT_FUSED 1
 #ifndef QSB_PERSIST_WINDOW_CAP
-#define QSB_PERSIST_WINDOW_CAP (36u<<20) /* 36 MiB as in ercumentyildirim b62c41b8; HY6 arm (after ercumentyildirim #1892, cefika 482a55e6): 42 MiB table window under an unchanged persisting set-aside; 0 = the base */
+#define QSB_PERSIST_WINDOW_CAP (40u<<20) /* Cover the current 40 MiB hot-bank prefix; keep the device-wide persisting set-aside unchanged. */
 #endif
 #define QSB_L2STATE 1033 /* 1 | 8 (state stores evict_last) | 1024 (finish discards consumed state lines); from PR #1891 */
 #ifndef QSB_GREEN
@@ -4111,8 +4111,21 @@ template<int SW> __device__ __forceinline__ void qsb_po_denominator(
     uint64_t d[4];
     uint64_t mask=0ULL-(uint64_t)pin_iso_xneg;
     d[0]=U[0]^mask;d[1]=U[1]^mask;d[2]=U[2]^mask;d[3]=U[3]^mask;
-    uint64_t c0=0xFFFFFFFEFFFFFC30ULL&mask;
-    UADDO1(d[0],c0);UADDC1(d[1],mask);UADDC1(d[2],mask);UADD1(d[3],mask);
+    uint32_t sm=(uint32_t)mask;
+    asm volatile(
+        "{\n"
+        ".reg .u32 kl,kh;\n"
+        ".reg .u64 k;\n"
+        "and.b32 kl,%4,976;\n"
+        "and.b32 kh,%4,1;\n"
+        "mov.b64 k,{kl,kh};\n"
+        "sub.cc.u64 %0,%0,k;\n"
+        "subc.cc.u64 %1,%1,0;\n"
+        "subc.cc.u64 %2,%2,0;\n"
+        "subc.u64 %3,%3,0;\n"
+        "}\n"
+        : "+l"(d[0]), "+l"(d[1]), "+l"(d[2]), "+l"(d[3])
+        : "r"(sm));
     QSB_SUB_P(d,d,X);
     uint64_t rw[5];
     if(SW) qsb_field_mul_sc(rw,d,V); else qsb_field_mul_sc(rw,V,d);
