@@ -1314,7 +1314,7 @@ Q8T static inline QCPU_AIF void fe8_bcast(fe8 &r, const fe &a) {           /* ca
     r.l[4] = _mm512_set1_epi64((long long)(a.v[3] >> 16));
 }
 #ifndef QSB_CPU_VBMI2
-#define QSB_CPU_VBMI2 1   /* the original form */            /* 1: funnel shifts (vpshrdq) in the 4x64 -> 5x52 conversion; every IFMA CPU in service has VBMI2.
+#define QSB_CPU_VBMI2 0   /* the original form */            /* 1: funnel shifts (vpshrdq) in the 4x64 -> 5x52 conversion; every IFMA CPU in service has VBMI2.
                                     * 0 (after the co-grinder audit's port model): srli + slli + or instead. On Zen 4 vpshrdq zmm
                                     * issues on FP0/FP1 only (uops.info), the pipes IFMA and sha256rnds2 saturate, while the shifts go to
                                     * FP2/FP3 and the or anywhere: 6 FP01 ops per group of 8 rows move off the binding pipes for +12
