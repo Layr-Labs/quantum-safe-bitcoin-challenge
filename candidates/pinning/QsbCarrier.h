@@ -52,8 +52,9 @@ enum QsbCarrierKernel {
     QK_RF,       /* qsb_root_fused<K>             (optional: empty name when absent) */
     QK_RR,       /* qsb_root_register             (optional) */
     QK_PFC,      /* qsb_prefix_field_check_kernel (optional) */
-    QK_LC,
-    QK_CE,
+    /* All ten declared kernels have actual launch sites in this program.
+     * The generated empty LC/CE slots are not launchable and must not force
+     * the unused compute_52 module to receive duplicate constant uploads. */
     QK_N
 };
 
@@ -184,6 +185,50 @@ static cudaError_t qsb_carrier_launch(void (*)(P...), int kid, dim3 g, dim3 b, c
     }
     return e;
 }
+
+/* A host-batch-private typed parameter frame. Generic launches above remain unchanged.
+ * Addresses are bound once to the same declared parameter types as the old tuple.
+ * No copy/move is permitted because argv points inside this object's storage. */
+template <typename... P>
+class QsbCarrierArgPack {
+    std::tuple<typename std::decay<P>::type...> vals;
+    void *argv[sizeof...(P) > 0 ? sizeof...(P) : 1];
+    template <size_t... I> void bind(std::index_sequence<I...>) {
+        int bound[] = {0, ((argv[I] = (void *)&std::get<I>(vals)), 0)...};
+        (void)bound;
+    }
+public:
+    static constexpr size_t arity = sizeof...(P);
+    template <typename... A> explicit QsbCarrierArgPack(A &&...a)
+        : vals(std::forward<A>(a)...), argv{} {
+        static_assert(sizeof...(P) == sizeof...(A), "carrier frame: argument count mismatch");
+        bind(std::index_sequence_for<P...>{});
+    }
+    QsbCarrierArgPack(const QsbCarrierArgPack &) = delete;
+    QsbCarrierArgPack(QsbCarrierArgPack &&) = delete;
+    QsbCarrierArgPack &operator=(const QsbCarrierArgPack &) = delete;
+    QsbCarrierArgPack &operator=(QsbCarrierArgPack &&) = delete;
+    template <size_t I, class A> void set(A &&a) {
+        static_assert(I < sizeof...(P), "carrier frame: parameter index out of range");
+        std::get<I>(vals) = std::forward<A>(a);
+    }
+    cudaError_t launch_bound(const void *kernel, int kid, dim3 g, dim3 b, cudaStream_t st) {
+        cudaError_t e = cudaLaunchKernel(kernel, g, b, argv, 0, st);
+        if (e != cudaSuccess) {
+            fprintf(stderr, "Native carrier kernel %d launch failed: %s\n",
+                    kid, cudaGetErrorString(e));
+            exit(2);
+        }
+        return e;
+    }
+    cudaError_t launch(int kid, dim3 g, dim3 b, cudaStream_t st) {
+        return launch_bound((const void *)g_qsb_carrier.k[kid],kid,g,b,st);
+    }
+};
+template <class F> struct QsbCarrierArgPackFor;
+template <typename... P> struct QsbCarrierArgPackFor<void (*)(P...)> {
+    using type = QsbCarrierArgPack<P...>;
+};
 
 /* cudaMemcpyToSymbol into the carrier image's copy of the symbol when it is on, and into
  * the compute_52 image's copy unless QSB_NOJIT keeps that image untouched (see above):
