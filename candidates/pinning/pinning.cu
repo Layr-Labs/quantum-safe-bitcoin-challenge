@@ -7289,8 +7289,11 @@ int main(int argc, char **argv) {
         if (se != cudaSuccess) { printf("CUDA error: %s\n", cudaGetErrorString(se)); return 1; }
     }
     uint32_t slot_seq[QSB_SLOTS]={0}, slot_lt[QSB_SLOTS]={0};
+    /* GPT-6.1 Sol / Codex: retained completed work for controller feedback.
+     * Assign after collecting the old slot, credit only after done succeeds. */
+    uint32_t slot_bsz[QSB_SLOTS]={0};
 #if QSB_PK_ON
-    uint64_t slot_bno[QSB_SLOTS]={0}; uint32_t slot_bsz[QSB_SLOTS]={0};
+    uint64_t slot_bno[QSB_SLOTS]={0};
 #endif
     int slot_busy[QSB_SLOTS];
     uint32_t cur_mid[8];
@@ -7311,7 +7314,7 @@ int main(int argc, char **argv) {
 #if QSB_PK_ON
         qcg::tick(qcg::mono_s(),(double)slot_bsz[s]);
 #else
-        qcg::tick(qcg::mono_s(),(double)BATCH);
+        qcg::tick(qcg::mono_s(),(double)slot_bsz[s]);
 #endif
 #endif
 #if QSB_COMPACT_READBACK
@@ -7406,7 +7409,7 @@ int main(int argc, char **argv) {
         qcg::tick(qcg::mono_s(),(double)(complete-last_completed_credit));
         last_completed_credit=complete;
 #else
-        qcg::tick(qcg::mono_s(),(double)BATCH);
+        qcg::tick(qcg::mono_s(),(double)slot_bsz[s]);
 #endif
 #endif
         slot_busy[s] = 0;
@@ -7515,9 +7518,10 @@ int main(int argc, char **argv) {
 #endif
             cudaStream_t st = slot_stream[s];
             slot_seq[s] = seq; slot_lt[s] = batch_lt;
+            slot_bsz[s] = (uint32_t)batch_sz;
 #if QSB_PK_ON
             /* this batch's plane last held batch batch_no-1-2*QSB_SLOTS: finish and keep its hits */
-            slot_bno[s] = batch_no - 1; slot_bsz[s] = (uint32_t)batch_sz;
+            slot_bno[s] = batch_no - 1;
             uint32_t pk_seq = 0, pk_lt = 0, pk_count = 0, pk_hits[64];
             const int pk_have = qsb_pk::collect(batch_no - 1, pk_seq, pk_lt, pk_count, pk_hits);
 #endif
