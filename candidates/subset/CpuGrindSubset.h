@@ -2540,6 +2540,40 @@ QSHA16 static unsigned kh16_pass(const uint32_t *m, uint32_t *wk
 #define R16(x, n) _mm512_ror_epi32((x), (n))
 #define S0_16(x) _mm512_ternarylogic_epi32(R16(x, 7), R16(x, 18), _mm512_srli_epi32(x, 3), 0x96)
 #define S1_16(x) _mm512_ternarylogic_epi32(R16(x, 17), R16(x, 19), _mm512_srli_epi32(x, 10), 0x96)
+#if QSB_CPU_SHA4
+    /* Build four key-major rings at a time and use the existing SHA-NI
+     * fused schedule/compression helper. This avoids materializing all
+     * 64 W+K rows in the sixteen-key scratch buffer. Its fixed padding
+     * remains intact for both PAD_READY instantiations. */
+    (void)wk;
+    unsigned pass = 0;
+    const __m128i zero = _mm_setzero_si128();
+#pragma GCC unroll 1
+    for (int G = 0; G < 4; G++) {
+        alignas(16) __m128i mr[16], a[4], b[4];
+#pragma GCC unroll 4
+        for (int e = 0; e < 4; e++) {
+            const int key = 4 * G + e;
+            mr[4 * e + 0] = _mm_set_epi32((int)m[48 + key], (int)m[32 + key], (int)m[16 + key], (int)m[key]);
+            mr[4 * e + 1] = _mm_set_epi32((int)m[112 + key], (int)m[96 + key], (int)m[80 + key], (int)m[64 + key]);
+            mr[4 * e + 2] = _mm_cvtsi32_si128((int)m[128 + key]);
+            mr[4 * e + 3] = _mm_set_epi32(264, 0, 0, 0);
+        }
+        qsha_rounds4m<true>(mr, a, b);
+        const __m128i h01 = _mm_unpackhi_epi32(a[0], a[1]);
+        const __m128i h23 = _mm_unpackhi_epi32(a[2], a[3]);
+        const __m128i hv4 = _mm_unpackhi_epi64(h01, h23);
+        const __m128i hit4 = _mm_cmpeq_epi32(_mm_srli_epi32(hv4, 32 - (QSB_ZEROS_N < 32 ? QSB_ZEROS_N : 32)), zero);
+        pass |= (unsigned)_mm_movemask_ps(_mm_castsi128_ps(hit4)) << (4 * G);
+#ifdef QSB_CPU_DEVBENCH
+        if (h0_out) _mm_storeu_si128((__m128i *)(h0_out + 4 * G), hv4);
+#endif
+    }
+#undef S0_16
+#undef S1_16
+#undef R16
+    return pass;
+#else
     __m512i W[16];
 #pragma GCC unroll 9
     for (int i = 0; i < 9; i++) W[i] = _mm512_load_si512((const void *)(m + 16 * i));
@@ -2617,6 +2651,7 @@ QSHA16 static unsigned kh16_pass(const uint32_t *m, uint32_t *wk
 #else
     const __m512i hv = _mm512_load_si512((const void *)h0);   /* pk_prefilter of the 16 keys: bit k = key k passes */
     return (unsigned)_mm512_cmpeq_epi32_mask(_mm512_srli_epi32(hv, 32 - (QSB_ZEROS_N < 32 ? QSB_ZEROS_N : 32)), _mm512_setzero_si512());
+#endif
 #endif
 }
 #endif
