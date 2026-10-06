@@ -5,6 +5,30 @@
 #ifndef QSB_INVERSE_BIAS
 #define QSB_INVERSE_BIAS 1
 #endif
+#ifndef QSB_INVERSE_SIGNMAC
+#define QSB_INVERSE_SIGNMAC 0
+#endif
+#if QSB_INVERSE_SIGNMAC < 0 || QSB_INVERSE_SIGNMAC > 1
+#error "QSB_INVERSE_SIGNMAC must be 0 or 1"
+#endif
+#if QSB_INVERSE_SIGNMAC
+/* Signed32 coefficients times raw unsigned32 limbs, exact modulo 2^64.
+ * Accumulate unsigned products first; then apply both sign corrections to
+ * high32. Actual selected LUT coefficients make the signed64 sum defined. */
+__device__ __forceinline__ int64_t zi_signmac32(int32_t a,uint32_t x,int32_t b,uint32_t y){
+    int64_t value;
+    asm("{ .reg .u64 total; .reg .u32 lo,hi,am,bm;\n"
+        "mul.wide.u32 total,%1,%2;\n"
+        "mad.wide.u32 total,%3,%4,total;\n"
+        "shr.s32 am,%1,31; and.b32 am,am,%2;\n"
+        "shr.s32 bm,%3,31; and.b32 bm,bm,%4;\n"
+        "mov.b64 {lo,hi},total;\n"
+        "sub.u32 hi,hi,am; sub.u32 hi,hi,bm;\n"
+        "mov.b64 %0,{lo,hi}; }"
+        : "=l"(value) : "r"(a),"r"(x),"r"(b),"r"(y));
+    return value;
+}
+#endif
 /* One full warp per inverse: four signed rows, eight low limbs per row.
  * Each row's signed ninth limb is replicated. Normalize independent limb
  * products with ballot carry/borrow lookahead, then perform the exact >>30.
@@ -46,7 +70,11 @@ __device__ __forceinline__ bool zi_inverse_limbs_bounded(uint64_t *R,int lane){
         const int32_t b=__shfl_sync(mask,selected,odd?8:16);
         const uint32_t y=__shfl_sync(mask,x,lane^8);
         const int32_t yt=__shfl_sync(mask,xt,lane^8);
+#if QSB_INVERSE_SIGNMAC
+        int64_t acc=zi_signmac32(a,x,b,y);
+#else
         int64_t acc=(int64_t)a*(int64_t)x+(int64_t)b*(int64_t)y;
+#endif
         const uint32_t la_acc1=__shfl_down_sync(mask,(uint32_t)acc,1,8);
         const uint32_t la_x0=((uint32_t)acc>>30)|((la_acc1+(uint32_t)(acc>>32))<<2);
         const uint32_t la_f0=__shfl_sync(mask,la_x0,0),la_g0=__shfl_sync(mask,la_x0,8);
@@ -72,7 +100,11 @@ __device__ __forceinline__ bool zi_inverse_limbs_bounded(uint64_t *R,int lane){
         const int32_t b=__shfl_sync(mask,selected,odd?8:16);
         const uint32_t y=__shfl_sync(mask,x,lane^8);
         const int32_t yt=__shfl_sync(mask,xt,lane^8);
+#if QSB_INVERSE_SIGNMAC
+        int64_t acc=zi_signmac32(a,x,b,y);
+#else
         int64_t acc=(int64_t)a*(int64_t)x+(int64_t)b*(int64_t)y;
+#endif
         uint32_t m=__shfl_sync(mask,(uint32_t)acc,start);
 #endif
         m=(m*ZI_MM32)&ZI_MASK30&(0u-rs);

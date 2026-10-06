@@ -968,6 +968,13 @@ static int qsb_rf_grid_n = 0;              /* host: the persistent grid (set fro
  * g rows take no Montgomery correction, so the new low limb is ((u32)acc0 >> 30) | (((u32)acc1 + (u32)(acc0
  * >> 32)) << 2) (work/divstep_lookahead_replay.py replays both forms). One more shuffle per batch, the same
  * decision instructions; a terminated batch discards its speculative decision. */
+/* Standalone exact signed32/raw32 inverse accumulator sign correction. */
+#ifndef QSB_INVERSE_SIGNMAC
+#define QSB_INVERSE_SIGNMAC 1
+#endif
+#if QSB_INVERSE_SIGNMAC < 0 || QSB_INVERSE_SIGNMAC > 1
+#error "QSB_INVERSE_SIGNMAC must be 0 or 1"
+#endif
 #ifndef QSB_DIVSTEP_LOOKAHEAD
 #define QSB_DIVSTEP_LOOKAHEAD 0
 #endif
@@ -5987,7 +5994,12 @@ static void qsb_table_l2_window(cudaStream_t *streams, int n_streams,
 #else
 #define QSB_K16_CODE_ROLL
 #endif
-#define QSB_CARRIER_KNOBS_16 QSB_SYS_KNOBS QSB_LEA_KNOBS QSB_K16_POOL_RCONST QSB_K16_EC_PSI_ZZ QSB_ROOT_LANE_KNOBS QSB_K16_LOSS QSB_XSHA_KNOBS QSB_K16_FOLD_REG QSB_K16_YP_DC QSB_K16_CODE_ROLL
+#if QSB_INVERSE_SIGNMAC
+#define QSB_K16_INVERSE_SIGNMAC QSB_CARRIER_KV(QSB_INVERSE_SIGNMAC)
+#else
+#define QSB_K16_INVERSE_SIGNMAC
+#endif
+#define QSB_CARRIER_KNOBS_16 QSB_SYS_KNOBS QSB_LEA_KNOBS QSB_K16_POOL_RCONST QSB_K16_EC_PSI_ZZ QSB_ROOT_LANE_KNOBS QSB_K16_LOSS QSB_XSHA_KNOBS QSB_K16_FOLD_REG QSB_K16_YP_DC QSB_K16_CODE_ROLL QSB_K16_INVERSE_SIGNMAC
 #ifdef QSB_CARRIER_BUILD   /* only the image carries it; the host keeps the string */
 __device__ __constant__ char qsb_carrier_knobs[] = QSB_CARRIER_KNOBS;
 #endif
