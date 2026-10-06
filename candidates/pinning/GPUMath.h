@@ -308,7 +308,7 @@
 #endif
 /* Retest square/fused f8 retention; leave the multiply-side cut enabled. */
 #ifndef QSB_RESTORE_SQR_F8
-#define QSB_RESTORE_SQR_F8 1
+#define QSB_RESTORE_SQR_F8 0
 #endif
 #if QSB_RESTORE_SQR_F8 != 0 && QSB_RESTORE_SQR_F8 != 1
 #error "QSB_RESTORE_SQR_F8 must be 0 or 1"
