@@ -52,7 +52,7 @@ __device__ __forceinline__ uint32_t qsb_fadd(uint32_t a, uint32_t one, uint32_t 
 }
 
 #ifndef QSB_SHA_FMA_EARLY
-#define QSB_SHA_FMA_EARLY 1 /* Exact FMA-add schedule for early pubkey rounds. */
+#define QSB_SHA_FMA_EARLY 0 /* Early rounds use ALU sums; rolling compression retains exact FMA adds. */
 #endif
 
 /* QSB_SHA_FMA_ROT: the same pipe-balance trick for rotations. x * 2^k as a 64-bit product is
@@ -486,10 +486,19 @@ QSB_RL_F(c, d, e, f, g, h, a, b, QSB_KWF(qsb_klit(k + 14), w[14]));\
 QSB_RND15L_F(k);\
 QSB_RL_F(b, c, d, e, f, g, h, a, QSB_KWF(qsb_klit(k + 15), w[15]));\
 }
+/* Only the rolling message schedule changes pipe: four SHA word addends plus
+ * the host-maintained constant-bank zero encourage two three-input ALU sums
+ * instead of three serial multiply-pipe adds. Compression rounds and the
+ * sparse first 32 words retain the leader's existing FMA implementation.
+ * Read all four old words before updating w[j]; all sums are unsigned u32. */
+#if QSB_SHA_ALU_ADD
+#define QSB_FIN_SCHED_Z pin_zero_add
+#else
+#define QSB_FIN_SCHED_Z 0u
+#endif
 #define QSB_STEPL_F(j, a,b,c,d,e,f,g,h, base) do { \
-    w[j] = qsb_fadd(w[j], one, QSB_s1M(w[((j)+14)&15])); \
-    w[j] = qsb_fadd(w[j], one, w[((j)+9)&15]); \
-    w[j] = qsb_fadd(w[j], one, QSB_s0M(w[((j)+1)&15])); \
+    w[j] = w[j] + QSB_s1M(w[((j)+14)&15]) + w[((j)+9)&15] + \
+           QSB_s0M(w[((j)+1)&15]) + QSB_FIN_SCHED_Z; \
     QSB_RL_F(a,b,c,d,e,f,g,h,QSB_KWF(qsb_klit((base)+(j)), w[j])); \
 } while (0)
 #define QSB_INTERLEAVED15L_F(base) do { \
@@ -692,9 +701,7 @@ __device__ __forceinline__ uint32_t _SHA256Pubkey33H0(const uint32_t m[9])
         QSB_RND16L_F(16);
         QSB_INTERLEAVED16L_F(32);
         QSB_INTERLEAVED15L_F(48);
-        w[15] = qsb_fadd(w[15], one, s1(w[13]));
-        w[15] = qsb_fadd(w[15], one, w[8]);
-        w[15] = qsb_fadd(w[15], one, s0(w[0]));
+        w[15] = w[15] + s1(w[13]) + w[8] + s0(w[0]) + QSB_FIN_SCHED_Z;
 #if QSB_FIN_R63_SUM && QSB_FIN_R63_LEA && QSB_FIN_LEA
         const uint32_t r0 = a + w[15] + (qsb_klit(63) + QSB_IV0);
         const uint32_t r1 = r0 + Ch(f,g,h) + Maj(b,c,d);
