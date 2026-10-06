@@ -534,7 +534,7 @@ static void *worker_main(void *arg) {
     else if (g_worker_set_on) pthread_setaffinity_np(pthread_self(), sizeof g_worker_set, &g_worker_set);
     set_idle_priority();
     worker_t *w = (worker_t *)aligned_alloc(64, (sizeof(worker_t) + 63) & ~(size_t)63);
-    if (!w) return NULL;
+    if (!w) { if (id == 0) S->failed.store(1); return NULL; }
     w->id = id; w->cur_seq_tag = 0;
     w->grp = EC_GROUP_new_by_curve_name(NID_secp256k1);
     w->ctx = BN_CTX_new(); w->order = BN_new(); w->nri = BN_new(); w->rx = BN_new(); w->ry = BN_new();
@@ -547,6 +547,7 @@ static void *worker_main(void *arg) {
     void *vs = NULL;
 #if QSB_CG_HAVE_SIMD
     if (S->has_avx2) vs = aligned_alloc(64, (sizeof(v4::vstate) + 63) & ~(size_t)63);
+    if (S->has_avx2 && !vs) { S->failed.store(1); return NULL; }
 #endif
     void *vi = NULL;
 #if QSB_CG_HAVE_SIMD
@@ -554,6 +555,7 @@ static void *worker_main(void *arg) {
     if (S->has_ifma && !vi) { S->failed.store(1); return NULL; }
 #endif
     sstate *ss = (sstate *)aligned_alloc(64, (sizeof(sstate) + 63) & ~(size_t)63);
+    if (!ss) { S->failed.store(1); return NULL; }
     while (!S->ready.load(std::memory_order_acquire)) { if (S->stop.load() || S->failed.load()) return NULL; usleep(2000); }
     /* Worker 0 picks the SHA and EC paths on this CPU from timed real batches (their candidates
      * are real work and are counted); the others wait. Each (SHA, EC) combination runs 5 batches,
@@ -626,7 +628,7 @@ static void *worker_main(void *arg) {
                    (double)S->table_bytes / 1048576.0, S->lay.nwin, S->t_build);
         }
     }
-    while (S->ec_mode.load() < 0) { if (S->stop.load()) return NULL; usleep(1000); }
+    while (S->ec_mode.load() < 0) { if (S->stop.load() || S->failed.load()) return NULL; usleep(1000); }
     int ecm = S->ec_mode.load();
     /* dev probe: QSB_COGRIND_HETERO=1 runs odd workers on the scalar MULX path and even ones on
      * AVX2, so SMT siblings can issue on different execution ports */
