@@ -547,6 +547,7 @@ static void *worker_main(void *arg) {
     void *vs = NULL;
 #if QSB_CG_HAVE_SIMD
     if (S->has_avx2) vs = aligned_alloc(64, (sizeof(v4::vstate) + 63) & ~(size_t)63);
+    if (S->has_avx2 && !vs) { S->failed.store(1); return NULL; }
 #endif
     void *vi = NULL;
 #if QSB_CG_HAVE_SIMD
@@ -554,6 +555,7 @@ static void *worker_main(void *arg) {
     if (S->has_ifma && !vi) { S->failed.store(1); return NULL; }
 #endif
     sstate *ss = (sstate *)aligned_alloc(64, (sizeof(sstate) + 63) & ~(size_t)63);
+    if (!ss) { S->failed.store(1); return NULL; }
     while (!S->ready.load(std::memory_order_acquire)) { if (S->stop.load() || S->failed.load()) return NULL; usleep(2000); }
     /* Worker 0 picks the SHA and EC paths on this CPU from timed real batches (their candidates
      * are real work and are counted); the others wait. Each (SHA, EC) combination runs 5 batches,
