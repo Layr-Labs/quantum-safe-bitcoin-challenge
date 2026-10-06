@@ -52,7 +52,7 @@ __device__ __forceinline__ uint32_t qsb_fadd(uint32_t a, uint32_t one, uint32_t 
 }
 
 #ifndef QSB_SHA_FMA_EARLY
-#define QSB_SHA_FMA_EARLY 1 /* Exact FMA-add schedule for early pubkey rounds. */
+#define QSB_SHA_FMA_EARLY 0 /* Early rounds use ALU sums; rolling rounds retain exact FMA adds. */
 #endif
 
 /* QSB_SHA_FMA_ROT: the same pipe-balance trick for rotations. x * 2^k as a 64-bit product is
