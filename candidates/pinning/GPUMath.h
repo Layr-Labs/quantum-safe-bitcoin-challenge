@@ -320,6 +320,20 @@
 #define QSB_SQR_F8_CAP "\taddc.u32 f8, 0, 0;\n"
 #define QSB_SQR_F8SRC "f8"
 #endif
+/* Plain square only: preserve f8, supplying the stock opaque zero at
+ * capture so ptxas may consume both retained carry predicates in one IADD3.X.
+ * This does not change SAS, whose z8 also consumes the added-e carry. */
+#ifndef QSB_PLAIN_SQR_DUAL_CAPTURE
+#define QSB_PLAIN_SQR_DUAL_CAPTURE 1
+#endif
+#if QSB_PLAIN_SQR_DUAL_CAPTURE != 0 && QSB_PLAIN_SQR_DUAL_CAPTURE != 1
+#error "QSB_PLAIN_SQR_DUAL_CAPTURE must be 0 or 1"
+#endif
+#if QSB_PLAIN_SQR_DUAL_CAPTURE && QSB_SHORT_CARRY && QSB_RESTORE_SQR_F8
+#define QSB_PLAIN_SQR_F8_CAP "\t.reg .u32 sqfz; ld.const.u32 sqfz, [pin_zero_add]; addc.u32 f8, sqfz, 0;\n"
+#else
+#define QSB_PLAIN_SQR_F8_CAP QSB_SQR_F8_CAP
+#endif
 #ifndef QSB_MUL_SFZ_PACK
 #define QSB_MUL_SFZ_PACK 1
 #endif
@@ -388,10 +402,10 @@
 #endif
 #if QSB_SQR_ROW
 #define QSB_SQR_FOLD_LOW \
-    "\tmov.b64 {x8,x9}, d4; mov.b64 {x10,x11}, d5; mov.b64 {x12,x13}, d6; mov.b64 {x14,x15}, d7;\n\t.reg .u64 f0,f1,f2,f3,g0,g1,g2,g3;\n\t.reg .u32 f8,g8,z0,z1,z2,z3,z4,z5,z6,z7,z8,z9,w0,w1,w2,w3,w4,w5,w6,w7,m0,m1,m2;\n\tmul.wide.u32 t, x8, 977;  add.cc.u64  f0, d0, t;\n\tmul.wide.u32 t, x10, 977; addc.cc.u64 f1, d1, t;\n\tmul.wide.u32 t, x12, 977; addc.cc.u64 f2, d2, t;\n\tmul.wide.u32 t, x14, 977; addc.cc.u64 f3, d3, t;\n" QSB_SQR_F8_CAP "\tmul.wide.u32 t, x9, 977;  add.cc.u64  g0, d4, t;\n\tmul.wide.u32 t, x11, 977; addc.cc.u64 g1, d5, t;\n\tmul.wide.u32 t, x13, 977; addc.cc.u64 g2, d6, t;\n\tmul.wide.u32 t, x15, 977; addc.cc.u64 g3, d7, t;\n"
+    "\tmov.b64 {x8,x9}, d4; mov.b64 {x10,x11}, d5; mov.b64 {x12,x13}, d6; mov.b64 {x14,x15}, d7;\n\t.reg .u64 f0,f1,f2,f3,g0,g1,g2,g3;\n\t.reg .u32 f8,g8,z0,z1,z2,z3,z4,z5,z6,z7,z8,z9,w0,w1,w2,w3,w4,w5,w6,w7,m0,m1,m2;\n\tmul.wide.u32 t, x8, 977;  add.cc.u64  f0, d0, t;\n\tmul.wide.u32 t, x10, 977; addc.cc.u64 f1, d1, t;\n\tmul.wide.u32 t, x12, 977; addc.cc.u64 f2, d2, t;\n\tmul.wide.u32 t, x14, 977; addc.cc.u64 f3, d3, t;\n" QSB_PLAIN_SQR_F8_CAP "\tmul.wide.u32 t, x9, 977;  add.cc.u64  g0, d4, t;\n\tmul.wide.u32 t, x11, 977; addc.cc.u64 g1, d5, t;\n\tmul.wide.u32 t, x13, 977; addc.cc.u64 g2, d6, t;\n\tmul.wide.u32 t, x15, 977; addc.cc.u64 g3, d7, t;\n"
 #else
 #define QSB_SQR_FOLD_LOW \
-    "mov.b64 {x0,x1}, d0; mov.b64 {x2,x3}, d1; mov.b64 {x4,x5}, d2; mov.b64 {x6,x7}, d3;\n\tmov.b64 {x8,x9}, d4; mov.b64 {x10,x11}, d5; mov.b64 {x12,x13}, d6; mov.b64 {x14,x15}, d7;\n\t.reg .u64 fr0,fr1,fr2,fr3,h0,h1,h2,h3,f0,f1,f2,f3,g0,g1,g2,g3;\n\t.reg .u32 f8,g8,z0,z1,z2,z3,z4,z5,z6,z7,z8,z9,w0,w1,w2,w3,w4,w5,w6,w7,m0,m1,m2;\n\tmov.b64 fr0, {x0,x1}; mov.b64 fr1, {x2,x3}; mov.b64 fr2, {x4,x5}; mov.b64 fr3, {x6,x7};\n\tmov.b64 h0, {x8,x9}; mov.b64 h1, {x10,x11}; mov.b64 h2, {x12,x13}; mov.b64 h3, {x14,x15};\n\tmul.wide.u32 t, x8, 977;  add.cc.u64  f0, fr0, t;\n\tmul.wide.u32 t, x10, 977; addc.cc.u64 f1, fr1, t;\n\tmul.wide.u32 t, x12, 977; addc.cc.u64 f2, fr2, t;\n\tmul.wide.u32 t, x14, 977; addc.cc.u64 f3, fr3, t;\n" QSB_SQR_F8_CAP "\tmul.wide.u32 t, x9, 977;  add.cc.u64  g0, h0, t;\n\tmul.wide.u32 t, x11, 977; addc.cc.u64 g1, h1, t;\n\tmul.wide.u32 t, x13, 977; addc.cc.u64 g2, h2, t;\n\tmul.wide.u32 t, x15, 977; addc.cc.u64 g3, h3, t;\n"
+    "mov.b64 {x0,x1}, d0; mov.b64 {x2,x3}, d1; mov.b64 {x4,x5}, d2; mov.b64 {x6,x7}, d3;\n\tmov.b64 {x8,x9}, d4; mov.b64 {x10,x11}, d5; mov.b64 {x12,x13}, d6; mov.b64 {x14,x15}, d7;\n\t.reg .u64 fr0,fr1,fr2,fr3,h0,h1,h2,h3,f0,f1,f2,f3,g0,g1,g2,g3;\n\t.reg .u32 f8,g8,z0,z1,z2,z3,z4,z5,z6,z7,z8,z9,w0,w1,w2,w3,w4,w5,w6,w7,m0,m1,m2;\n\tmov.b64 fr0, {x0,x1}; mov.b64 fr1, {x2,x3}; mov.b64 fr2, {x4,x5}; mov.b64 fr3, {x6,x7};\n\tmov.b64 h0, {x8,x9}; mov.b64 h1, {x10,x11}; mov.b64 h2, {x12,x13}; mov.b64 h3, {x14,x15};\n\tmul.wide.u32 t, x8, 977;  add.cc.u64  f0, fr0, t;\n\tmul.wide.u32 t, x10, 977; addc.cc.u64 f1, fr1, t;\n\tmul.wide.u32 t, x12, 977; addc.cc.u64 f2, fr2, t;\n\tmul.wide.u32 t, x14, 977; addc.cc.u64 f3, fr3, t;\n" QSB_PLAIN_SQR_F8_CAP "\tmul.wide.u32 t, x9, 977;  add.cc.u64  g0, h0, t;\n\tmul.wide.u32 t, x11, 977; addc.cc.u64 g1, h1, t;\n\tmul.wide.u32 t, x13, 977; addc.cc.u64 g2, h2, t;\n\tmul.wide.u32 t, x15, 977; addc.cc.u64 g3, h3, t;\n"
 #endif
 
 #define MM64 0xD838091DD2253531ULL
