@@ -444,7 +444,7 @@ static_assert(QSB_CPU_BATCH_SOLO % 32 == 0 && QSB_CPU_BATCH_SOLO >= 32 && QSB_CP
 #error "QSB_CPU_I34_CANON_TOP: 0, 1 (as i34-9 wrote it: fe8_parity, kh16_canon) or 2 (also kh16_words52)"
 #endif
 #ifndef QSB_CPU_NCH
-#define QSB_CPU_NCH 2
+#define QSB_CPU_NCH 4
 #endif
 #ifndef QSB_CPU_PFSPREAD
 #define QSB_CPU_PFSPREAD 3
