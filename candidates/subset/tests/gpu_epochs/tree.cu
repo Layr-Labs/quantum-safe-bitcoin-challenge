@@ -1070,6 +1070,20 @@ static int qsb_rf_grid_n = 0;              /* host: the persistent grid (set fro
 #ifndef QSB_SHA_UEXIT
 #define QSB_SHA_UEXIT 0
 #endif
+#ifndef QSB_CONST_PEEL_MASK
+#define QSB_CONST_PEEL_MASK 1
+#endif
+#if QSB_CONST_PEEL_MASK < 0 || QSB_CONST_PEEL_MASK > 15
+#error "QSB_CONST_PEEL_MASK must be in 0..15"
+#endif
+#if QSB_CONST_PEEL_MASK && (QSB_CONST_CALLEE == 0 || ZLAB_DUAL_EPOCH_SHA == 0 || QSB_SHA_UEXIT != 0)
+#error "Selective peel requires paired SHA, constant callee, and UEXIT=0"
+#endif
+#if QSB_CONST_PEEL_MASK
+#define QSB_SELECTIVE_PEEL_KNOBS QSB_CARRIER_KV(QSB_CONST_PEEL_MASK)
+#else
+#define QSB_SELECTIVE_PEEL_KNOBS
+#endif
 #if (QSB_SHA_W0FOLD != 0 && QSB_SHA_W0FOLD != 1) || QSB_SHA_UEXIT < 0 || QSB_SHA_UEXIT > 4
 #error "QSB_SHA_W0FOLD is 0 or 1; QSB_SHA_UEXIT is 0 to 4"
 #endif
@@ -5987,7 +6001,7 @@ static void qsb_table_l2_window(cudaStream_t *streams, int n_streams,
 #else
 #define QSB_K16_CODE_ROLL
 #endif
-#define QSB_CARRIER_KNOBS_16 QSB_SYS_KNOBS QSB_LEA_KNOBS QSB_K16_POOL_RCONST QSB_K16_EC_PSI_ZZ QSB_ROOT_LANE_KNOBS QSB_K16_LOSS QSB_XSHA_KNOBS QSB_K16_FOLD_REG QSB_K16_YP_DC QSB_K16_CODE_ROLL
+#define QSB_CARRIER_KNOBS_16 QSB_SYS_KNOBS QSB_SELECTIVE_PEEL_KNOBS QSB_LEA_KNOBS QSB_K16_POOL_RCONST QSB_K16_EC_PSI_ZZ QSB_ROOT_LANE_KNOBS QSB_K16_LOSS QSB_XSHA_KNOBS QSB_K16_FOLD_REG QSB_K16_YP_DC QSB_K16_CODE_ROLL
 #ifdef QSB_CARRIER_BUILD   /* only the image carries it; the host keeps the string */
 __device__ __constant__ char qsb_carrier_knobs[] = QSB_CARRIER_KNOBS;
 #endif

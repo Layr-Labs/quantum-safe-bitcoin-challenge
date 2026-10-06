@@ -242,6 +242,17 @@ struct QsbPairS18 { uint32_t w[18]; };
 #else
 #define QSB_CC_RET QsbPairS16
 #endif
+// GPT selective-block prototype, derived from the existing owner's first-trip peel.
+// Mask bit b selects constant block b. Default off; no performance claim.
+#ifndef QSB_CONST_PEEL_MASK
+#define QSB_CONST_PEEL_MASK 1
+#endif
+#if QSB_CONST_PEEL_MASK < 0 || QSB_CONST_PEEL_MASK > 15
+#error "QSB_CONST_PEEL_MASK must be a four-bit nonnegative mask"
+#endif
+#if QSB_CONST_PEEL_MASK && QSB_SHA_UEXIT != 0
+#error "Selective peel requires QSB_SHA_UEXIT=0"
+#endif
 __device__ __noinline__ QSB_CC_RET qsb_pair_const4(QsbPairS16 s) {
     uint32_t a0,b0,c0,d0,e0,f0,g0,h0,a1,b1,c1,d1,e1,f1,g1,h1,t1,t2;
 #if QSB_SHA_W0FOLD
@@ -252,6 +263,19 @@ __device__ __noinline__ QSB_CC_RET qsb_pair_const4(QsbPairS16 s) {
     for(int block=0;block<4;block++){
         a0=s.w[0];b0=s.w[1];c0=s.w[2];d0=s.w[3];e0=s.w[4];f0=s.w[5];g0=s.w[6];h0=s.w[7];
         a1=s.w[8];b1=s.w[9];c1=s.w[10];d1=s.w[11];e1=s.w[12];f1=s.w[13];g1=s.w[14];h1=s.w[15];
+#if defined(QSB_CONST_PEEL_MASK) && QSB_CONST_PEEL_MASK
+        if (QSB_CONST_PEEL_MASK & (1u << block)) {
+            const uint4 ka=K[block*16], kb=K[block*16+1];
+            {const uint32_t w=ka.x;S2Round(a0,b0,c0,d0,e0,f0,g0,h0,0,w);S2Round(a1,b1,c1,d1,e1,f1,g1,h1,0,w);}
+            {const uint32_t w=ka.y;S2Round(h0,a0,b0,c0,d0,e0,f0,g0,0,w);S2Round(h1,a1,b1,c1,d1,e1,f1,g1,0,w);}
+            {const uint32_t w=ka.z;S2Round(g0,h0,a0,b0,c0,d0,e0,f0,0,w);S2Round(g1,h1,a1,b1,c1,d1,e1,f1,0,w);}
+            {const uint32_t w=ka.w;S2Round(f0,g0,h0,a0,b0,c0,d0,e0,0,w);S2Round(f1,g1,h1,a1,b1,c1,d1,e1,0,w);}
+            {const uint32_t w=kb.x;S2Round(e0,f0,g0,h0,a0,b0,c0,d0,0,w);S2Round(e1,f1,g1,h1,a1,b1,c1,d1,0,w);}
+            {const uint32_t w=kb.y;S2Round(d0,e0,f0,g0,h0,a0,b0,c0,0,w);S2Round(d1,e1,f1,g1,h1,a1,b1,c1,0,w);}
+            {const uint32_t w=kb.z;S2Round(c0,d0,e0,f0,g0,h0,a0,b0,0,w);S2Round(c1,d1,e1,f1,g1,h1,a1,b1,0,w);}
+            {const uint32_t w=kb.w;S2Round(b0,c0,d0,e0,f0,g0,h0,a0,0,w);S2Round(b1,c1,d1,e1,f1,g1,h1,a1,0,w);}
+        }
+#endif
 #if QSB_SHA_UEXIT == 1
         /* QSB_SHA_UEXIT 1 (lane SHA probe): the byte offset is the only induction variable, so the exit test can
          * sit on the uniform datapath with the ULDC address. Same words, rounds and order. */
@@ -275,6 +299,11 @@ __device__ __noinline__ QSB_CC_RET qsb_pair_const4(QsbPairS16 s) {
          * immediate constant-bank operands (no ULDC, no loop control, no per-block copies). Code-size arm. */
         #pragma unroll
         for(int q=0;q<16;q+=2){
+            const uint4 ka=K[block*16+q], kb=K[block*16+q+1];
+#elif defined(QSB_CONST_PEEL_MASK) && QSB_CONST_PEEL_MASK
+        /* probe: trip 0 of each block peeled (it reads the block's input words), so no per-block copies */
+        #pragma unroll 1
+        for(int q=(QSB_CONST_PEEL_MASK & (1u << block)) ? 2 : 0;q<16;q+=2){
             const uint4 ka=K[block*16+q], kb=K[block*16+q+1];
 #else
         #pragma unroll 1
