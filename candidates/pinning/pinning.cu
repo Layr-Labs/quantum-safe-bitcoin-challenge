@@ -556,6 +556,15 @@ static_assert(QSB_COMPLETION_MODE >= 0 && QSB_COMPLETION_MODE <= 3, "completion 
 #ifndef QSB_L2STATE
 #define QSB_L2STATE 0
 #endif
+#ifndef QSB_DISCARD_BEFORE_FINISH
+#define QSB_DISCARD_BEFORE_FINISH 1
+#endif
+#if QSB_DISCARD_BEFORE_FINISH != 0 && QSB_DISCARD_BEFORE_FINISH != 1
+#error "QSB_DISCARD_BEFORE_FINISH must be 0 or 1"
+#endif
+#if QSB_DISCARD_BEFORE_FINISH && (!(QSB_L2STATE & 1024) || !QSB_PREP_STATE)
+#error "QSB_DISCARD_BEFORE_FINISH requires consumed-state discard and block-major planes"
+#endif
 /* QSB_PROBE_NOSTATE (speed probe only, wrong math): prepare/finish address the state of block
  * blockIdx.x & 63 only, so the state traffic never leaves L2. */
 #ifndef QSB_PROBE_NOSTATE
@@ -2374,6 +2383,7 @@ __device__ int gpu_is_der_easy(const uint8_t *d, int l) { return l>=9&&(d[0]>>4)
 #endif
 /* Native carrier fingerprint; checked against the fixed compute_52 build. */
 __device__ __constant__ int qsb_carrier_zeros = QSB_ZEROS_N;
+__device__ __constant__ int qsb_carrier_discard_before_finish = QSB_DISCARD_BEFORE_FINISH;
 __device__ int gpu_leading_zero_bits(const uint8_t *h) {
     int z = 0;
     for (int i = 0; i < 32; i++) {
@@ -4460,6 +4470,9 @@ __global__ void __launch_bounds__(STAGE == 0 ? QSB_S0_THREADS : QSB_S2_THREADS,
 #endif
     } else {
 
+#if QSB_DISCARD_BEFORE_FINISH && QSB_SM80_PTX
+    const unsigned qsb_finish_live_mask=__ballot_sync(0xffffffffu,active);
+#endif
     if(!active)return;
 #if QSB_PK_ON
     uint8_t *const pk_rec=(FAST_TAIL && d_gt &&
@@ -4487,6 +4500,19 @@ __global__ void __launch_bounds__(STAGE == 0 ? QSB_S0_THREADS : QSB_S2_THREADS,
     ulonglong2 y01=saved[0*s+i],y23=saved[1*s+i];
     ulonglong2 v01=saved[2*s+i],v23=saved[3*s+i];
 #endif
+#endif
+#if QSB_DISCARD_BEFORE_FINISH && QSB_SM80_PTX
+    /* The predicate consumes every loaded limb. Its synchronized ballot is a
+     * register-data dependency, so all participating lanes have consumed their
+     * four state loads before any 8-lane leader invalidates a state line.
+     * A zero-state leader can leave its cache line to ordinary eviction. */
+    const unsigned qsb_loaded_nonzero=__ballot_sync(qsb_finish_live_mask,
+        (y01.x|y01.y|y23.x|y23.y|v01.x|v01.y|v23.x|v23.y)!=0);
+    if((threadIdx.x&7u)==0u && (qsb_loaded_nonzero&(1u<<(threadIdx.x&31u)))){
+        const ulonglong2 *dst=saved+(uint32_t)(QSB_STATE_BLK*(QSB_STATE_PLANES*QSB_TREE_N)+threadIdx.x);
+        qsb_discard_l2(dst); qsb_discard_l2(dst+QSB_TREE_N);
+        qsb_discard_l2(dst+2*QSB_TREE_N); qsb_discard_l2(dst+3*QSB_TREE_N);
+    }
 #endif
     qy[0]=y01.x;qy[1]=y01.y;qy[2]=y23.x;qy[3]=y23.y;
     qzzz[0]=v01.x;qzzz[1]=v01.y;qzzz[2]=v23.x;qzzz[3]=v23.y;
@@ -4531,7 +4557,7 @@ __global__ void __launch_bounds__(STAGE == 0 ? QSB_S0_THREADS : QSB_S2_THREADS,
     uint64_t q1x[4],q2x[4];
     uint32_t y_parities = qsb_packed_finish(
         qy,qzzz,prod,weighted_inv,u2rx,u2ry,recovery_c,q1x,q2x);
-#if (QSB_L2STATE & 1024) && QSB_SM80_PTX && QSB_PREP_STATE
+#if (QSB_L2STATE & 1024) && QSB_SM80_PTX && QSB_PREP_STATE && !QSB_DISCARD_BEFORE_FINISH
     /* QSB_L2STATE bit 1024: drop this block's state lines from L2 (no write-back) as soon as
      * the recovery has consumed them: every lane's four loads fed qsb_packed_finish, and the
      * warp's loads were one instruction per plane, so the whole 8-lane group has its data. */
