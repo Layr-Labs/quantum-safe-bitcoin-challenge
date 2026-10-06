@@ -114,6 +114,36 @@ static QI_INL void fnorm(vfe *r) {
     t4 &= vs1(QI_M48);
     r->n[0] = t0; r->n[1] = t1; r->n[2] = t2; r->n[3] = t3; r->n[4] = t4;
 }
+/* Canonicalize a proven weak input, never a lazy fsub output: n0..n3 <
+ * 2^52, n4 < 2^48 + 2^10. from_w, fwk, and fmul establish this bound.
+ * If n4 has bit 48, V=2^256+L with L<2^218, so one +C fold is canonical.
+ * Otherwise V>=p exactly for digits [n0>=2^52-C,M,M,M,T]. These cases
+ * are disjoint: one flag merges the high fold and p subtraction. The
+ * general fnorm stays available for arbitrary limbs <2^62. */
+static QI_INL V fweak_flag(const vfe *r) {
+    const V M = vs1(QI_M52);
+    const V mid = r->n[1] & r->n[2] & r->n[3];
+    const V ge = (V)_mm256_cmpgt_epi64((__m256i)r->n[0], (__m256i)vs1(0xFFFFEFFFFFC2FULL - 1));
+    return (r->n[4] >> 48) |
+        ((V)_mm256_cmpeq_epi64((__m256i)r->n[4], (__m256i)vs1(QI_M48)) &
+         (V)_mm256_cmpeq_epi64((__m256i)mid, (__m256i)M) & ge & vs1(1));
+}
+static QI_INL void fnorm_weak(vfe *r) {
+    const V M = vs1(QI_M52), x = fweak_flag(r);
+    V t0 = r->n[0], t1 = r->n[1], t2 = r->n[2], t3 = r->n[3], t4 = r->n[4];
+    t0 += (vs1(0) - x) & vs1(QI_C);
+    t1 += t0 >> 52; t0 &= M;
+    t2 += t1 >> 52; t1 &= M;
+    t3 += t2 >> 52; t2 &= M;
+    t4 += t3 >> 52; t3 &= M;
+    t4 &= vs1(QI_M48);
+    r->n[0] = t0; r->n[1] = t1; r->n[2] = t2; r->n[3] = t3; r->n[4] = t4;
+}
+/* C is odd, so the canonical low bit is original n0 XOR the reduction
+ * flag. This is non-mutating and has the same strict weak-input bound. */
+static QI_INL V fparity_weak(const vfe *r) {
+    return (r->n[0] ^ fweak_flag(r)) & vs1(1);
+}
 /* QCG_Y_PARITY_PASS (kill switch, default 1): hash_block reads only bit 0 of a y's limb 0 (the
  * 02/03 prefix byte). fparity returns that bit of fnorm's canonical result without the second
  * carry pass: fnorm's final t0 is (t0 + x*C) mod 2^52 with x in {0, 1} its >= p flag and
@@ -199,7 +229,7 @@ static QI_INL void vinv(vfe *inv, const vfe *m) {
     fpermx(&s, m, 1); oth = s; fmul(&q1, m, &s);
     fpermx(&s, &q1, 2); fmul(&t, &oth, &s); fmul(&q2, &q1, &s);
     oth = t;
-    fnorm(&q2);
+    fnorm_weak(&q2);
     V w[4]; to_w(w, &q2);
     uint64_t tw[4] = {w[0][0], w[1][0], w[2][0], w[3][0]}, iw[4];
     scalar_inv(iw, tw);
@@ -400,10 +430,10 @@ static QI_FN void ec_batch(worker_t *w, vstate *vs) {
             fsub(&ym, &ym, &py[b]);
             vfe xp = px[b], yp = py[b];
 #if QCG_Y_PARITY_PASS && !defined(QCG_EC_HOOK)
-            fnorm(&xp); fnorm(&xm);
-            yp.n[0] = fparity(&py[b]); ym.n[0] = fparity(&ym);
+            fnorm_weak(&xp); fnorm_weak(&xm);
+            yp.n[0] = fparity_weak(&py[b]); ym.n[0] = fparity(&ym);
 #else
-            fnorm(&xp); fnorm(&yp); fnorm(&xm); fnorm(&ym);
+            fnorm_weak(&xp); fnorm(&yp); fnorm_weak(&xm); fnorm(&ym);
 #endif
 #ifdef QCG_EC_HOOK
             { V a4[4], b4[4], c4[4], d4[4]; to_w(a4, &xp); to_w(b4, &yp); to_w(c4, &xm); to_w(d4, &ym);
