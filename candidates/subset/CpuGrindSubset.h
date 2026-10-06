@@ -245,8 +245,15 @@
 #ifndef QSB_CPU_CFOLD
 #define QSB_CPU_CFOLD 1            /* 8-lane path: C folded into the top window's table; the final step is one addition (-2C) */
 #endif
+#ifndef QSB_CPU_FIRST_ROW_RING
+#define QSB_CPU_FIRST_ROW_RING 1    /* reuse first-window RowSgn results in bounded lookahead storage */
+#endif
+#if QSB_CPU_FIRST_ROW_RING != 0 && QSB_CPU_FIRST_ROW_RING != 1
+#error "QSB_CPU_FIRST_ROW_RING must be 0 or 1"
+#endif
+
 #ifndef QSB_CPU_PFD1
-#define QSB_CPU_PFD1 8             /* prefetch distance of the first window's loop (window 0 loads), in groups */
+#define QSB_CPU_PFD1 3             /* prefetch distance of the first window's loop (window 0 loads), in groups */
 #endif
 #ifndef QSB_CPU_PFD
 #define QSB_CPU_PFD 3              /* table-row prefetch distance, in groups of 8 candidates */
@@ -297,6 +304,17 @@
 #ifndef QSB_CPU_BATCH_AUTO
 #define QSB_CPU_BATCH_AUTO 1
 #endif
+/* QSB_CPU_BATCH_SIB (10-05; cefika's QSB_CPU_BATCH_ODD idea, e6825eb2, ported to QSB_CPU_PIN_WORKERS): when the shared-core
+ * batch (QSB_CPU_BATCH) is in use and the workers are pinned one CPU per physical core first, the workers on each core's second
+ * SMT sibling (pin rank >= 1, i.e. tid mod |pin_cpus| >= number of cores) use this batch; the rank-0 workers keep the shared-core
+ * batch, so one core holds 0.25 + 0.5 MB of EC state in its 1 MB L2. Unpinned lanes: odd workers, as in e6825eb2. Each worker
+ * owns its batch buffers and walks its own contiguous range in order, so only the grouping of its own candidates changes: same
+ * candidates, same order, same records. 0: every worker uses the chosen batch, as before. */
+#ifndef QSB_CPU_BATCH_SIB
+#define QSB_CPU_BATCH_SIB 2048
+#endif
+static_assert(QSB_CPU_BATCH_SIB == 0 || (QSB_CPU_BATCH_SIB % 32 == 0 && QSB_CPU_BATCH_SIB >= 32 && QSB_CPU_BATCH_SIB <= 8192),
+              "QSB_CPU_BATCH_SIB: 0 or a multiple of 32, 32..8192");
 #ifndef QSB_CPU_BATCH_SOLO
 #define QSB_CPU_BATCH_SOLO 4096
 #endif
@@ -459,6 +477,26 @@ static_assert(QSB_CPU_BATCH_SOLO % 32 == 0 && QSB_CPU_BATCH_SOLO >= 32 && QSB_CP
 #if (QSB_CPU_ILP2 || QSB_CPU_NCH != 4) && !(QSB_CPU_WPRE && QSB_CPU_NOTX)
 #error "QSB_CPU_ILP2 / QSB_CPU_NCH are written for the QSB_CPU_WPRE + QSB_CPU_NOTX window step"
 #endif
+/* QSB_CPU_KHFUSE (2026-10-05; host-only, not an image knob; 0 = the code above byte for byte): key-hash fusion into the final
+ * backward pass. With QSB_CPU_KH16 in use (its run-time guard: SHA-NI, AVX-512VL and the C fold) vec_batch's final step is
+ * ec8_final_cf_khf: ec8_final_cf_kh's EC steps line for line, and right after each pair of groups' two kh16_store calls (their
+ * final x and parity of y, both recids) the pair's two kh16_pass calls run, the same function on the same 144 message words, so
+ * the same 16 key hashes and prefilter masks per group. The message words live in a two-group scratch (VecBuf::m16, 2 x 576 B)
+ * instead of G x 576 B (72 B per candidate) held from the final pass to the separate key-hash loop that followed it; each group's
+ * mask (bit 8 ri + j, as kh16_pass returns it) goes to VecBuf::kp[h]. The worker's loop after vec_batch is the previous loop with
+ * kp[h] in place of the kh16_pass call: groups, candidates and recids ascending, one recid per candidate, the same exact gate
+ * (gate_publish_exact). The same prefilter passes therefore reach the gate in the same order, and the hit file is written in the
+ * same order, with the same records. One phase transition (final pass -> key-hash loop) per batch fewer. Requires QSB_CPU_KH16
+ * and the paired final pass (QSB_CPU_ILP2 bit 0). */
+#ifndef QSB_CPU_KHFUSE
+#define QSB_CPU_KHFUSE 1
+#endif
+#if QSB_CPU_KHFUSE != 0 && QSB_CPU_KHFUSE != 1
+#error "QSB_CPU_KHFUSE must be 0 or 1"
+#endif
+#if QSB_CPU_KHFUSE && !(QSB_CPU_KH16 && (QSB_CPU_ILP2 & 1))
+#error "QSB_CPU_KHFUSE is written for QSB_CPU_KH16 with the paired final pass (QSB_CPU_ILP2 bit 0)"
+#endif
 #if QSB_CPU_AINL
 #define QCPU_AI always_inline,
 #define QCPU_AIF __attribute__((always_inline))
@@ -578,6 +616,12 @@ static_assert(QSB_CPU_BATCH_SOLO % 32 == 0 && QSB_CPU_BATCH_SOLO >= 32 && QSB_CP
 #ifndef QSB_CPU_FOLD_PAR
 #define QSB_CPU_FOLD_PAR 1
 #endif
+/* QSB_CPU_PIN_WORKERS: bind each co-grinder worker to one logical CPU from
+ * the worker mask. Order one CPU per physical core first, then SMT siblings.
+ * Host-only: no carrier knob and no candidate/search-order change. */
+#ifndef QSB_CPU_PIN_WORKERS
+#define QSB_CPU_PIN_WORKERS 1
+#endif
 /* QSB_CPU_TOUCH_FUSE (default 0 = the full first touch): a 9- or 10-window table keeps the sampled first touch (1 region in
  * 32) as its huge-page gate and skips the full pass, so the build's own writes fault the rest of the table in while other
  * threads run additions; the huge-page fraction is measured again over the whole table after the build and printed (and used
@@ -586,7 +630,7 @@ static_assert(QSB_CPU_BATCH_SOLO % 32 == 0 && QSB_CPU_BATCH_SOLO >= 32 && QSB_CP
  * ownership of freshly faulted lines), each build thread ending with a store fence. Same table entries; table_check and the
  * fixed-work hit set are the gates. Both are host-only start-up items, priced by the start-up timeline job. */
 #ifndef QSB_CPU_TOUCH_FUSE
-#define QSB_CPU_TOUCH_FUSE 0
+#define QSB_CPU_TOUCH_FUSE 1   /* 10-05: on, as in dukemawex's ranked lane 01f716b5 (crown lane + this switch) */
 #endif
 #ifndef QSB_CPU_BUILD_NT
 #define QSB_CPU_BUILD_NT 0
@@ -2620,6 +2664,50 @@ QSHA16 static unsigned kh16_pass(const uint32_t *m, uint32_t *wk
 #endif
 }
 #endif
+#if QSB_CPU_KHFUSE && QSB_CPU_KH16 && QCPU_VEC
+/* QSB_CPU_KHFUSE: ec8_final_cf_kh with the key hashes fused in (see the switch's note). The EC steps are ec8_final_cf_kh's line
+ * for line (the paired backward pass, QSB_CPU_ILP2 bit 0); each pair's two kh16_store calls write scratch slots 0 and 1 of m16s
+ * (2 x 144 dwords, 64-byte aligned) and the pair's two kh16_pass calls follow at once; kp[h] = group h's prefilter mask (bit
+ * 8 ri + j). wk16: the worker's W + K scratch (pairs 5..7 written once with QSB_CPU_JL_KH16_PAD_ONCE). */
+Q8T static void ec8_final_cf_khf(const fe8 *X, const fe8 *Y, fe8 *D, fe8 *PRE, int G, const fe &mx, const fe &my, uint32_t *m16s,
+                                 uint32_t *wk16, uint16_t *kp) {
+    fe8 MX, MY; fe8_bcast(MX, mx); fe8_bcast(MY, my);
+    const int NC = QSB_CPU_NCH;                      /* R2-D: chains of the batch inversion (4: the code before) */
+    fe8 run[4]; for (int c = 0; c < NC; c++) fe8_set1(run[c]);
+    for (int g = 0; g < G; g += NC)
+        for (int c = 0; c < NC; c++) {
+            const int h = g + c; fe8_sub_lz(D[h], MX, X[h]);
+#if QSB_CPU_WPRE
+            { fe8 t; fe8_sub_lz(t, MY, Y[h]);
+              if (QSB_CPU_JL_INV_FIRST && g == 0) fe8_cp(PRE[h], t);   /* QSB_CPU_JL_INV_FIRST (jacklightChen b1c5e58e) */
+              else fe8_mul_lz(PRE[h], run[c], t); }   /* weighted prefix, as in ec8_window */
+#else
+            fe8_cp(PRE[h], run[c]);
+#endif
+            if (QSB_CPU_JL_INV_FIRST && g == 0) fe8_cp(run[c], D[h]);
+            else fe8_mul_lz(run[c], run[c], D[h]);
+        }
+    QCPU_INVC(run);
+    /* R2-D (QSB_CPU_ILP2 bit 0): two groups of different chains step together, op by op, as in ec8_window */
+    for (int g = G - NC; g >= 0; g -= NC) {
+        for (int c = NC - 1; c >= 1; c -= 2) {
+            const int hA = g + c, hB = hA - 1;
+            fe8 tA, tB, lamA, lamB, x3A, x3B, y3A, y3B;
+            fe8_mul_lz(lamA, run[c], PRE[hA]); fe8_mul_lz(lamB, run[c - 1], PRE[hB]);
+            if (!QSB_CPU_JL_INV_LAST || g > 0) {     /* QSB_CPU_JL_INV_LAST (jacklightChen b1c5e58e): after g == 0 both chains are dead */
+                fe8_mul_lz(run[c], run[c], D[hA]); fe8_mul_lz(run[c - 1], run[c - 1], D[hB]);
+            }
+            fe8_sqr_sub2(x3A, lamA, X[hA], MX); fe8_sqr_sub2(x3B, lamB, X[hB], MX);
+            fe8_sub_lz(tA, X[hA], x3A); fe8_sub_lz(tB, X[hB], x3B);
+            fe8_mul_sub(y3A, lamA, tA, Y[hA]); fe8_mul_sub(y3B, lamB, tB, Y[hB]);
+            kh16_store(m16s, X[hA], fe8_parity(Y[hA]), x3A, fe8_parity(y3A));
+            kh16_store(m16s + 144, X[hB], fe8_parity(Y[hB]), x3B, fe8_parity(y3B));
+            kp[hA] = (uint16_t)kh16_pass<QSB_CPU_JL_KH16_PAD_ONCE != 0>(m16s, wk16);         /* pk_prefilter, bit 8 ri + j */
+            kp[hB] = (uint16_t)kh16_pass<QSB_CPU_JL_KH16_PAD_ONCE != 0>(m16s + 144, wk16);
+        }
+    }
+}
+#endif
 /* W[i] + K[i] for i < 64 of one 64-byte block (big-endian words), with qsha_x4's schedule steps. */
 QSHA static void qsha_schedule(uint32_t wk[64], const uint8_t *blk) {
     const __m128i BSWAP = _mm_set_epi64x(0x0c0d0e0f08090a0bULL, 0x0405060700010203ULL);
@@ -2678,6 +2766,8 @@ struct Ctx {
     qsb_hv_t hv;                    /* exact gate, used under io */
     FILE *out = nullptr;
     int nthreads = 0;
+    std::vector<int> pin_cpus;      /* QSB_CPU_PIN_WORKERS: one logical CPU per worker */
+    int pin_ncores = 0;             /* QSB_CPU_BATCH_SIB: number of physical cores in pin_cpus (rank-0 entries come first) */
     int batch = QSB_CPU_BATCH;      /* candidates per batch (a multiple of 32), set in start() before the workers (QSB_CPU_BATCH_AUTO) */
     char batch_why[48] = "default";
 #ifdef QSB_CPU_DEVBENCH
@@ -3273,7 +3363,11 @@ Q8T static void hpf_rows8q(const uint32_t *zb, int k0, const pt *t0, const pt *t
     for (int j = 0; j < (QSB_CPU_HPF > 1 ? 16 : 8); j++) { if (q.tail - q.head >= 64) qpf_drain(q, 1); q.a[q.tail & 63] = (const char *)a[j]; q.tail++; }
 }
 #endif
-struct VecBuf { fe8 *X = nullptr, *Y = nullptr, *D = nullptr, *P = nullptr, *TX = nullptr, *TY = nullptr; fe *qx = nullptr; uint8_t *qp = nullptr, *bad = nullptr; uint32_t *m16 = nullptr, *wk16 = nullptr; };
+struct VecBuf { fe8 *X = nullptr, *Y = nullptr, *D = nullptr, *P = nullptr, *TX = nullptr, *TY = nullptr; fe *qx = nullptr; uint8_t *qp = nullptr, *bad = nullptr; uint32_t *m16 = nullptr, *wk16 = nullptr;
+#if QSB_CPU_KHFUSE
+                 uint16_t *kp = nullptr;   /* QSB_CPU_KHFUSE: the batch's G prefilter masks from ec8_final_cf_khf, published after it */
+#endif
+};
 static bool vecbuf_alloc(VecBuf &v, int B) {
     const int G = B / 8; void *q[9] = {nullptr};
     const size_t sz[9] = {sizeof(fe8) * G, sizeof(fe8) * G, sizeof(fe8) * G, sizeof(fe8) * G, sizeof(fe8) * G, sizeof(fe8) * G,
@@ -3283,7 +3377,16 @@ static bool vecbuf_alloc(VecBuf &v, int B) {
     v.qx = (fe *)q[6]; v.qp = (uint8_t *)q[7]; v.bad = (uint8_t *)q[8];
 #if QSB_CPU_KH16 && QCPU_SHANI
     void *m = nullptr, *w = nullptr;   /* QSB_CPU_KH16: the groups' key-hash message words (9 x 16 dwords each) and the W + K scratch */
+#if QSB_CPU_KHFUSE
+    /* QSB_CPU_KHFUSE: m16 holds one pair of groups (ec8_final_cf_khf hashes each pair as it is produced); kp: the G masks */
+    void *k = nullptr;
+    if (posix_memalign(&m, 64, (size_t)2 * 144 * 4) || posix_memalign(&w, 64, 32 * 32 * 4) || posix_memalign(&k, 64, ((size_t)G * 2 + 63) & ~(size_t)63)) {
+        free(m); free(w); for (int j = 0; j < 9; j++) free(q[j]); return false;
+    }
+    v.kp = (uint16_t *)k;
+#else
     if (posix_memalign(&m, 64, (size_t)G * 144 * 4) || posix_memalign(&w, 64, 32 * 32 * 4)) { free(m); for (int j = 0; j < 9; j++) free(q[j]); return false; }
+#endif
     v.m16 = (uint32_t *)m; v.wk16 = (uint32_t *)w;
 #if QSB_CPU_JL_KH16_PAD_ONCE
     /* QSB_CPU_JL_KH16_PAD_ONCE (jacklightChen b1c5e58e): pairs 5..7 hold rounds 10..15's W + K, the same for all 16 keys (W10..W14 = 0,
@@ -3308,6 +3411,34 @@ struct RowSgn {
         return _mm512_test_epi64_mask(e, _mm512_set1_epi64(0x80000000LL));
     }
 };
+#if QSB_CPU_FIRST_ROW_RING
+/* GPT 6.1 Sol / high / Codex: compact refinement of RowSgn lookahead reuse.
+ * Preload happens before consumption: min(G, PF+1) slots, not PF, are needed.
+ * Existing rpb/ngb capacity stays unchanged; native traffic/codegen are unmeasured. */
+Q8TX static void ec8_first_row_ring(fe8 *X, fe8 *Y, int G, const RowSgn &rowfn, const RowSgn &nxt,
+                                 const pt **rpn, __mmask8 *ngn, const pt **rpf, __mmask8 *ngf) {
+    const int PF = QSB_CPU_PFD1;
+    if (PF <= 0 || G <= 0) { ec8_first(X, Y, G, rowfn, nxt, rpn, ngn); return; }
+    const int CAP = PF >= G ? G : PF + 1;
+    fe8 Z; for (int i = 0; i < 5; i++) Z.l[i] = _mm512_setzero_si512();
+    for (int h = 0; h < PF && h < G; h++) { const pt **pr = rpf + (size_t)h * 8; ngf[h] = rowfn(h, pr); for (int j = 0; j < 8; j++) _mm_prefetch((const char *)pr[j], _MM_HINT_T0); }
+    int read_slot = 0, future_slot = PF < G ? PF : 0;
+    for (int h = 0; h < G; h++) {
+        if (PF < G - h) {
+            const pt **pr = rpf + (size_t)future_slot * 8; ngf[future_slot] = rowfn(h + PF, pr);
+            for (int j = 0; j < 8; j++) _mm_prefetch((const char *)pr[j], _MM_HINT_T0);
+            if (++future_slot == CAP) future_slot = 0;
+        }
+        { const pt **pn = rpn + (size_t)h * 8; ngn[h] = nxt(h, pn); if (QSB_CPU_F1N) for (int j = 0; j < 8; j++) _mm_prefetch((const char *)pn[j], _MM_HINT_T0); }
+        const __mmask8 ng = ngf[read_slot];
+        fe8 ty; pt8_load(X[h], ty, rpf + (size_t)read_slot * 8);
+        if (ng) { fe8 n; fe8_sub(n, Z, ty); for (int i = 0; i < 5; i++) Y[h].l[i] = _mm512_mask_blend_epi64(ng, ty.l[i], n.l[i]); }
+        else fe8_cp(Y[h], ty);
+        if (++read_slot == CAP) read_slot = 0;
+    }
+}
+#endif
+
 /* The EC part of one batch on the 8-lane path: z*A for every candidate (g.nw table windows), then
  * both recovery ids against C. zb holds the candidates' z words, ds receives the digits (window-major). */
 Q8TX static void vec_batch(const Ctx *c, const uint32_t *zb, uint32_t *ds, int B, VecBuf &v) {
@@ -3319,14 +3450,22 @@ Q8TX static void vec_batch(const Ctx *c, const uint32_t *zb, uint32_t *ds, int B
     static thread_local std::vector<__mmask8> nga, ngb;
     if ((int)rpa.size() < G * 8) { rpa.resize((size_t)G * 8); rpb.resize((size_t)G * 8); nga.resize((size_t)G); ngb.resize((size_t)G); }
     const pt **rp = rpa.data(), **rpn = rpb.data(); __mmask8 *ng = nga.data(), *ngn = ngb.data();
+#if QSB_CPU_FIRST_ROW_RING
+    ec8_first_row_ring(v.X, v.Y, G, RowSgn{c->tw[0], ds}, RowSgn{c->tw[1], ds + B}, rp, ng, rpn, ngn);
+#else
     ec8_first(v.X, v.Y, G, RowSgn{c->tw[0], ds}, RowSgn{c->tw[1], ds + B}, rp, ng);
+#endif
     for (int i = 1; i < g.nw; i++) {
         if (i + 1 < g.nw) { const RowSgn rn{c->tw[i + 1], ds + (size_t)(i + 1) * B}; ec8_window(v.X, v.Y, v.D, v.P, v.TX, v.TY, G, rp, ng, rpn, ngn, &rn); }
         else ec8_window<RowSgn>(v.X, v.Y, v.D, v.P, v.TX, v.TY, G, rp, ng, nullptr, nullptr, nullptr);
         std::swap(rp, rpn); std::swap(ng, ngn);
     }
 #if QSB_CPU_KH16 && QCPU_SHANI
+#if QSB_CPU_KHFUSE
+    if (c->cfold && c->kh16) ec8_final_cf_khf(v.X, v.Y, v.D, v.P, G, c->mx, c->my, v.m16, v.wk16, v.kp); else   /* QSB_CPU_KHFUSE */
+#else
     if (c->cfold && c->kh16) ec8_final_cf_kh(v.X, v.Y, v.D, v.P, G, c->mx, c->my, v.m16); else
+#endif
 #endif
     if (c->cfold) ec8_final_cf(v.X, v.Y, v.D, v.P, G, c->mx, c->my, v.qx, v.qp);
     else ec8_final(v.X, v.Y, v.D, v.P, G, c->cx, c->cy, v.qx, v.qp);
@@ -3335,12 +3474,22 @@ Q8TX static void vec_batch(const Ctx *c, const uint32_t *zb, uint32_t *ds, int B
 
 static void worker(Ctx *c, int tid) {
     struct LiveGuard { std::atomic<int> &n; ~LiveGuard() { n--; } } live_guard{c->live};   /* H9: the spawner counted this worker */
+#if defined(CPU_COUNT) && QSB_CPU_PIN_WORKERS
+    if (!c->pin_cpus.empty()) {
+        cpu_set_t one; CPU_ZERO(&one);
+        CPU_SET(c->pin_cpus[(size_t)tid % c->pin_cpus.size()], &one);
+        sched_setaffinity(0, sizeof one, &one);
+    }
+#endif
 #ifdef SCHED_IDLE
     struct sched_param sp; sp.sched_priority = 0; sched_setscheduler(0, SCHED_IDLE, &sp);
 #endif
     const digest_params_t *dp = c->dp;
-    const int B = QSB_CPU_BATCH_AUTO ? c->batch : QSB_CPU_BATCH;   /* QSB_CPU_BATCH_AUTO: chosen in start() (a multiple of 32, <= 8192), a
+    const int B0 = QSB_CPU_BATCH_AUTO ? c->batch : QSB_CPU_BATCH;  /* QSB_CPU_BATCH_AUTO: chosen in start() (a multiple of 32, <= 8192), a
                                                                      * run-time value as in 86c643ae; 0: the compile-time constant as before */
+    const bool sib = !c->pin_cpus.empty() ? ((int)((size_t)tid % c->pin_cpus.size()) >= c->pin_ncores && c->pin_ncores > 0)
+                                          : (tid & 1) != 0;     /* QSB_CPU_BATCH_SIB: second SMT sibling of a pinned core (odd tid unpinned) */
+    const int B = (QSB_CPU_BATCH_SIB && B0 == QSB_CPU_BATCH && sib) ? QSB_CPU_BATCH_SIB : B0;
     std::vector<pt> acc(B); std::vector<fe> d(2 * B), pre(2 * B);
     std::vector<uint8_t> inf(B), bad(B); std::vector<const pt *> tp(B);
     std::vector<uint32_t, qalloc64<uint32_t> > zb((size_t)B * 8), ds((size_t)NWMAX * B);   /* z words; digits */
@@ -3661,7 +3810,11 @@ static void worker(Ctx *c, int tid) {
 #if QSB_CPU_KH16
             if (c->kh16 && c->cfold) {                  /* QSB_CPU_KH16: key hashes 16 at a time: the group's 8 candidates x 2 recids */
                 for (int h = 0; h < B / 8; h++) {
+#if QSB_CPU_KHFUSE
+                    const unsigned pass = vb.kp[h];   /* QSB_CPU_KHFUSE: group h's mask, from kh16_pass inside ec8_final_cf_khf (bit 8 ri + j) */
+#else
                     const unsigned pass = kh16_pass<QSB_CPU_JL_KH16_PAD_ONCE != 0>(vb.m16 + (size_t)h * 144, vb.wk16);   /* pk_prefilter, bit 8 ri + j */
+#endif
                     if (!pass) continue;
                     for (int j = 0; j < 8; j++) {
                         const int q = h * 8 + j;
@@ -4078,6 +4231,46 @@ static void start(const digest_params_t *dp, const uint8_t win3[][3], int nwin, 
 #endif
 #if QSB_CPU_DIAG_V4
         diag4_fill(*c, nth, hp, (t1.tv_sec - t0.tv_sec) + 1e-9 * (t1.tv_nsec - t0.tv_nsec));
+#endif
+#if defined(CPU_COUNT) && QSB_CPU_PIN_WORKERS
+        {
+            bool pin = true;
+            if (const char *e = getenv("QSB_CPU_PIN_WORKERS_ENV")) pin = atoi(e) != 0;
+            cpu_set_t m; CPU_ZERO(&m);
+            if (pin && sched_getaffinity(0, sizeof m, &m) == 0 && CPU_COUNT(&m) >= 1) {
+                std::vector<uint8_t> seen(CPU_SETSIZE, 0);
+                std::vector<std::vector<int>> cores;
+                for (int cpu = 0; cpu < CPU_SETSIZE; cpu++) {
+                    if (!CPU_ISSET(cpu, &m) || seen[cpu]) continue;
+                    cores.push_back({cpu}); seen[cpu] = 1;
+                    char path[96];
+                    snprintf(path, sizeof path, "/sys/devices/system/cpu/cpu%d/topology/thread_siblings_list", cpu);
+                    if (FILE *f = fopen(path, "r")) {
+                        char buf[256] = {0};
+                        const bool ok = fgets(buf, sizeof buf, f) != nullptr;
+                        fclose(f);
+                        for (char *q = buf; ok && *q;) {
+                            char *e2; long lo = strtol(q, &e2, 10);
+                            if (e2 == q) break;
+                            long hi = lo; q = e2;
+                            if (*q == '-') { hi = strtol(q + 1, &e2, 10); q = e2; }
+                            for (long x = lo; x <= hi && x < CPU_SETSIZE; x++)
+                                if (x >= 0 && CPU_ISSET(x, &m) && !seen[x]) {
+                                    cores.back().push_back((int)x); seen[x] = 1;
+                                }
+                            if (*q == ',') q++; else break;
+                        }
+                    }
+                }
+                for (size_t rank = 0, any = 1; any; rank++) {
+                    any = 0;
+                    for (const auto &core : cores) if (rank < core.size()) {
+                        c->pin_cpus.push_back(core[rank]); any = 1;
+                    }
+                }
+                c->pin_ncores = (int)cores.size();
+            }
+        }
 #endif
         c->live += nth; c->ready = 1;                   /* H9: stop_unmap may now wait for the workers and unmap */
         for (int t = 0; t < nth; t++) std::thread(worker, c, t).detach();
