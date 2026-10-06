@@ -757,13 +757,13 @@ static int qsb_rf_grid_n = 0;              /* host: the persistent grid (set fro
  * pre3 in its fronts. Needs the wave top and the templated tree (QSB_ROOT_LUT_SMEM or QSB_PRE3_ROOT); other
  * callers of the tree (tree_audit) keep warp 0. 0 = the base byte for byte. */
 #ifndef QSB_ROOT_WARP
-#define QSB_ROOT_WARP 0
+#define QSB_ROOT_WARP 2
 #endif
 #if QSB_ROOT_WARP < 0 || QSB_ROOT_WARP > 7
 #error "QSB_ROOT_WARP must be a warp of the 256-thread block (0..7)"
 #endif
-#if QSB_ROOT_WARP && !(QSB_TREE_WAVE_TOP && (QSB_ROOT_LUT_SMEM || QSB_PRE3_ROOT))
-#error "QSB_ROOT_WARP needs the wave top and the templated tree (QSB_ROOT_LUT_SMEM or QSB_PRE3_ROOT)"
+#if QSB_ROOT_WARP && !QSB_TREE_WAVE_TOP   /* without QSB_ROOT_LUT_SMEM / QSB_PRE3_ROOT the templated tree runs with LUT_ISSUED 0 */
+#error "QSB_ROOT_WARP needs the wave top (QSB_TREE_WAVE_TOP 1)"
 #endif
 #if QSB_ROOT_WARP && QSB_PRE3_ROOT == 2
 #error "QSB_ROOT_WARP is written for QSB_PRE3_ROOT 0 or 1"
@@ -903,7 +903,7 @@ static int qsb_rf_grid_n = 0;              /* host: the persistent grid (set fro
 #define QSB_S3_NM_SEED 1
 #endif
 #ifndef QSB_TREE_UNROLL
-#define QSB_TREE_UNROLL 0
+#define QSB_TREE_UNROLL 1
 #endif
 /* QSB_PARK128 1 (kernel_digest): candidate A's twelve parked words (and B's scalar, parked in rows 8..11 across A's
  * front) as six 16-byte rows, so each park and reload is one STS.128/LDS.128 per word pair instead of two 64-bit
@@ -923,7 +923,7 @@ static int qsb_rf_grid_n = 0;              /* host: the persistent grid (set fro
  * across both tails. The front keeps its ABI (its chain loop is not re-allocated by this). Same __constant__
  * words, same field operations, in the same order: bit-identical. */
 #ifndef QSB_R_CBANK_TAILS
-#define QSB_R_CBANK_TAILS 0
+#define QSB_R_CBANK_TAILS 1
 #endif
 #if QSB_R_CBANK_TAILS < 0 || QSB_R_CBANK_TAILS > 1
 #error "QSB_R_CBANK_TAILS must be 0 or 1"
@@ -1008,7 +1008,7 @@ static int qsb_rf_grid_n = 0;              /* host: the persistent grid (set fro
 #define QSB_CONST_CALLEE 1
 #endif
 #ifndef QSB_SHA_WROLL_PIPE
-#define QSB_SHA_WROLL_PIPE 0
+#define QSB_SHA_WROLL_PIPE 1
 #endif
 #ifndef QSB_DIVSTEP_4LANE
 #define QSB_DIVSTEP_4LANE 1
@@ -1070,6 +1070,104 @@ static int qsb_rf_grid_n = 0;              /* host: the persistent grid (set fro
 #ifndef QSB_SHA_UEXIT
 #define QSB_SHA_UEXIT 0
 #endif
+/* QSB_CC_GLUE (window_schedule_shared.cuh): the QSB_CONST_CALLEE callee's block loop rolled (the K+W row offset runs on
+ * across the four blocks) with each block's rounds 0..15 peeled: they read the saved state words and write the working
+ * registers, so the 16 per-block working-state copies and the per-block loop resets go, and the remaining 48 rounds run
+ * as three 16-round trips (half the loop control per round). Same words, rounds and order: bit-identical. 0 = the base
+ * callee byte for byte (the knob joins QSB_CARRIER_KNOBS only when nonzero). */
+#ifndef QSB_CC_GLUE
+#define QSB_CC_GLUE 1
+#endif
+#if QSB_CC_GLUE < 0 || QSB_CC_GLUE > 3
+#error "QSB_CC_GLUE is 0 to 3"
+#endif
+#if QSB_CC_GLUE && (!QSB_CONST_CALLEE || QSB_SHA_UEXIT || QSB_SHA_W0FOLD)
+#error "QSB_CC_GLUE reshapes the QSB_CONST_CALLEE callee: needs QSB_CONST_CALLEE 1, QSB_SHA_UEXIT 0 and QSB_SHA_W0FOLD 0"
+#endif
+/* ======================= cut3 R3 knobs (QSB_C3_TREE_*, QSB_C3_TAIL_*), 2026-10-04 =======================
+ * Every knob: default 0 = the base (k21pinct-faf, cubin efd38418276801d4) byte for byte; it joins QSB_CARRIER_KNOBS only
+ * when nonzero (QSB_K16_C3_R3 below).
+ *
+ * QSB_C3_TREE_GLUE (bit mask): glue cuts in kernel_digest's block-inverse tree (tree_inverse.cuh) and in the warp-0
+ * root's divstep loop (inverse_limbs.cuh). Every bit is exact on its own; see the argument per bit.
+ *   bit 0 (1): no batch cap in the root loop. The loop is Bernstein-Yang's divstep (delta = 1 at entry; the table steps
+ *     are exact divsteps, zinv32.cuh) on f = p (odd, < 2^256) and g = the lazy root (0 <= g < 2^256). By Bernstein-Yang
+ *     (Fast constant-time gcd computation and modular inversion, 2019, Theorem 11.2) g is 0 after at most
+ *     floor((49*256+80)/17) = 742 divsteps (the computed bound for 256-bit inputs is 724), i.e. within 25 batches of
+ *     30, and the loop leaves at the first batch whose g row is zero. The cap (ZI_ROOT_MAX_BATCHES = 32) is never
+ *     reached: the loop takes the same batches and leaves at the same point, and the fallback behind the cap
+ *     (qsb_root_fermat) never runs (NVBit: 0 executions in 262,144 blocks). Removing the counter, its test and the
+ *     fallback changes no value.
+ *   bit 1 (2): `selected` is formed on the decision lanes only (digit 0: lanes 0, 8, 16, 24). The two shuffles that
+ *     read it take it from those lanes only, so the other lanes' value (0 in the base) is never read: the same a, b.
+ *     (Superseded by bit 3 when both are set.)
+ *   bit 2 (4): acc -= factor*m as acc += (-factor)*m with -factor (0, -1 or -977, loop-invariant) formed once:
+ *     m < 2^30 and |factor| <= 977, so the signed product is exact in 64 bits and acc - factor*m does not wrap
+ *     (|acc| < 2^62): the same acc bits.
+ *   bit 3 (8): the 30-step decision on lanes 0 and 8 only (instead of 0, 8, 16, 24): lane 0 forms column 0 (u, q) and
+ *     lane 8 column 1 (v, r) with zi_divstep30_column; the columns of M <- D*M are independent and delta's update does
+ *     not read them, so each lane's column is the same integers lanes 0/8 (column 0) and 16/24 (column 1) form in the
+ *     base. f0, g0 are the same two words, read from lane 0's and lane 8's (x, y), y being the base's partner shuffle
+ *     moved ahead of the decision, so the two f0/g0 shuffles go. a = u on even rows and r on odd rows, b = v on even
+ *     rows and q on odd rows, exactly the four entries the base's shuffles deliver. Fewer active lanes for the same
+ *     decision instructions: most of what it removes is thread-level (NVBit counts active lanes).
+ *   bit 4 (16): the root's canonical form (zi_condneg, zi_canon after the loop) on lane 0 only. The only live caller
+ *     (the wave top, tree_inverse.cuh) reads lane 0's result alone (root[k] = __shfl_sync(.., root[k], 0)); lanes 1..31
+ *     computed the same words and nobody read them. Lane 0 computes exactly what it computed before (thread-level).
+ *   bit 5 (32): the tree's level branches whose writer count is a multiple of 32 (up levels with 128, 64, 32 writers;
+ *     down levels with 32, 64, 128) test tid < count through a full-warp vote (__any_sync(~0, tid < count)); the test
+ *     is one value per warp, so the vote returns it on every lane, and ptxas sees a warp-uniform branch and drops the
+ *     BSSY/BSYNC bracket. The same threads run the same products in the same order.
+ *   bit 6 (64): every 32-byte tree node (and the prodA park, same macro QTR_ST4) is stored as four 64-bit stores
+ *     (st.volatile.shared.u64, which ptxas does not merge back into 16-byte stores) to the same bytes instead of two
+ *     16-byte stores, so the product's words need no copies into aligned 4-register groups. The loads stay 16-byte.
+ *     Same words, same addresses, same barriers.
+ *   bit 7 (128): kernel_digest's park rows (B's scalar before front A; A's twelve words after it, parkA2 rows 0..5) as
+ *     two 64-bit stores per 16-byte row (QSB_C3_ST2), the bit-6 form: same words, same bytes, same order; the reads
+ *     stay 16-byte.
+ *   bit 8 (256; needs bit 2): three forms in the root loop's full-warp body. (a) The carry bias is added when the
+ *     accumulator starts: biased = Kb + a*x + b*y + (-factor)*m mod 2^64 with the loop-invariant per-lane
+ *     Kb = 2^63 - (digit ? 2^31 : 0), the same 64-bit word as the base's acc + 2^63 - (digit ? 2^31 : 0); m is shuffled
+ *     from the row's digit-0 lane, whose Kb has a zero low word, so it is computed from the same low word as before.
+ *     (b) The correction is one PTX mad.wide.s32 (-factor, m < 2^30: exact int64). (c) next = digit == 7 ? high : next0
+ *     as one lop3 with a loop-invariant lane mask. (d) The top limb's -2^31 (the bias telescoping into high) is added
+ *     with m: high = a*xt + b*yt + (int32)(m | 2^31), and (int32)(m | 2^31) = m - 2^31 because m < 2^30; the same
+ *     int64 high after hi7 and the carry are added (no wrap: |high| < 2^62). Same values throughout.
+ *   Written for the shipped root and tree: QSB_DIVSTEP_4LANE 1, QSB_DIVSTEP_LOOKAHEAD 0, QSB_INVERSE_CORRECTION 1,
+ *   QSB_INVERSE_BIAS 1, QSB_TREE_UNROLL 1, QSB_TREE_WAVE_TOP 1, QSB_TREE_ROW128 1, no ROOT_COMBINE / ROOT_LUT_SMEM /
+ *   PRE3_ROOT / ROOT_FILL. */
+#ifndef QSB_C3_TREE_GLUE
+#define QSB_C3_TREE_GLUE 381
+#endif
+#if QSB_C3_TREE_GLUE < 0 || QSB_C3_TREE_GLUE > 511
+#error "QSB_C3_TREE_GLUE is a 9-bit mask"
+#endif
+#if (QSB_C3_TREE_GLUE & 256) && !(QSB_C3_TREE_GLUE & 4)
+#error "QSB_C3_TREE_GLUE bit 8 uses bit 2's loop-invariant -factor: set bit 2 too"
+#endif
+#if QSB_C3_TREE_GLUE & 128
+/* bit 7: one 16-byte shared row (a ulonglong2 *) written as two 64-bit stores to the same bytes; st.volatile keeps
+ * ptxas from merging them back into one 16-byte store (and its register-quad copies). */
+#define QSB_C3_ST2(p,x,y) asm volatile("st.volatile.shared.u64 [%0],%1;\n\tst.volatile.shared.u64 [%0+8],%2;" \
+    :: "r"((uint32_t)__cvta_generic_to_shared(p)),"l"((uint64_t)(x)),"l"((uint64_t)(y)) : "memory")
+#endif
+#if QSB_C3_TREE_GLUE && (!QSB_DIVSTEP_4LANE || QSB_DIVSTEP_LOOKAHEAD || (defined(QSB_INVERSE_CORRECTION) && !QSB_INVERSE_CORRECTION) || \
+    (defined(QSB_INVERSE_BIAS) && !QSB_INVERSE_BIAS) || !QSB_TREE_UNROLL || !QSB_TREE_WAVE_TOP || !QSB_TREE_ROW128 || \
+    QSB_ROOT_COMBINE || QSB_ROOT_LUT_SMEM || QSB_PRE3_ROOT || QSB_ROOT_FILL)
+#error "QSB_C3_TREE_GLUE is written for the shipped root and tree (see its comment)"
+#endif
+/* QSB_C3_TAIL_ORDER (kernel_digest, the base tails): tail(B) is called before tail(A). Each tail is the same call on
+ * the same words (A's from its park rows, B's from registers) and returns the same verdict; only the order of the two
+ * calls, and so of the two possible hit records of one thread, changes. Hit records are already written in an
+ * inter-warp order fixed by atomicAdd races, and the record set (one record per passing candidate; far below the
+ * 1,024-slot cap per launch) is the same: bit-identical hit sets. */
+#ifndef QSB_C3_TAIL_ORDER
+#define QSB_C3_TAIL_ORDER 1
+#endif
+#if QSB_C3_TAIL_ORDER < 0 || QSB_C3_TAIL_ORDER > 1
+#error "QSB_C3_TAIL_ORDER is 0 or 1"
+#endif
+/* ===================== end of cut3 R3 knobs ===================== */
 #if (QSB_SHA_W0FOLD != 0 && QSB_SHA_W0FOLD != 1) || QSB_SHA_UEXIT < 0 || QSB_SHA_UEXIT > 4
 #error "QSB_SHA_W0FOLD is 0 or 1; QSB_SHA_UEXIT is 0 to 4"
 #endif
@@ -1082,6 +1180,32 @@ static int qsb_rf_grid_n = 0;              /* host: the persistent grid (set fro
 #if QSB_SHA_WROLL_PIPE && !QSB_SHA_SCHED_V4
 #error "QSB_SHA_WROLL_PIPE walks the 16 B rows of QSB_SHA_SCHED_V4"
 #endif
+/* ==== cut3 R2: QSB_C3_SHA_WIN (window_schedule_shared.cuh), loop control of the QSB_SHA_WROLL_PIPE window block ====
+ * The same pipelined 8-round trip body (each 16 B W+K row issued four rounds ahead of its first use, as in the base),
+ * with the row pointer kept as one 64-bit register that inline PTX steps in place (add.cc/addc on its halves) and
+ * reads with ld.global.v4.u32 (the base's own LDG.E.128), and the loop ending on the stepped pointer's low word
+ * instead of a trip counter (no counter increment per trip, no counter init).
+ *   1 = the first trip peeled (it reads the loaded first-state words, so the 16 working-state copies before the loop
+ *       go; its rows at immediate offsets from the start pointer, and the loop's pointer lags it by one trip, so the
+ *       peel needs no pointer step) + the low-word exit: 7 rolled trips.
+ *   2 = the low-word exit only (no peel; the copies stay): 8 rolled trips, static code the base's size.
+ *   3 = as 1 with the first two trips peeled: 6 rolled trips.
+ * Exact by construction: the same 64 rounds on the same rows of QSB_WINDOW_SECOND in the same order (each row read
+ * once, plus the one discarded read of padding row 16 that the base also makes), the same feed-forward. The exit test
+ * compares the low 32 bits of the pointer: it steps 2 rows (2 x QSB_SE_PER_EPOCH x 16 B) per trip over at most 8
+ * trips, 16 rows < 2^32 bytes in all, so its low word takes a distinct value at every step and equals the end value
+ * exactly when the 64-bit pointer does; the 64-bit step itself carries into the high word.
+ * 0 = the base window loop byte for byte (the knob joins QSB_CARRIER_KNOBS only when non-zero, QSB_K16_C3_SHA). */
+#ifndef QSB_C3_SHA_WIN
+#define QSB_C3_SHA_WIN 3
+#endif
+#if QSB_C3_SHA_WIN < 0 || QSB_C3_SHA_WIN > 3
+#error "QSB_C3_SHA_WIN is 0 to 3"
+#endif
+#if QSB_C3_SHA_WIN && (!QSB_SHA_WROLL_PIPE || !QSB_SHA_SCHED_V4 || QSB_ROOT_FILL)
+#error "QSB_C3_SHA_WIN reshapes the QSB_SHA_WROLL_PIPE window loop: needs QSB_SHA_WROLL_PIPE 1, QSB_SHA_SCHED_V4 1, QSB_ROOT_FILL 0"
+#endif
+/* ==== end cut3 R2 knob definitions ==== */
 #if QSB_DIVSTEP_4LANE && QSB_DIVSTEP_LOOKAHEAD
 #error "QSB_DIVSTEP_4LANE is written for the plain divstep loop, not QSB_DIVSTEP_LOOKAHEAD"
 #endif
@@ -3583,8 +3707,13 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
     // Park B's scalar while A runs its field chain (dukemawex 4cea5476); these four rows are free
     // until A's final four pre-inverse words are written below.
 #if QSB_PARK128
+#if QSB_C3_TREE_GLUE & 128
+    QSB_C3_ST2(&parkA2[4][tid],zpair.b[0],zpair.b[1]);   /* cut3 R3, QSB_C3_TREE_GLUE bit 7 */
+    QSB_C3_ST2(&parkA2[5][tid],zpair.b[2],zpair.b[3]);
+#else
     parkA2[4][tid]=make_ulonglong2(zpair.b[0],zpair.b[1]);
     parkA2[5][tid]=make_ulonglong2(zpair.b[2],zpair.b[3]);
+#endif
 #else
     #pragma unroll
     for(int k=0;k<4;k++)parkA[8+k][tid]=zpair.b[k];
@@ -3621,11 +3750,20 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
 #endif
 #endif
 #if ZLAB_DUAL_EPOCH_SHA && QSB_PARK128
+#if QSB_C3_TREE_GLUE & 128
+        /* cut3 R3, QSB_C3_TREE_GLUE bit 7: the same words to the same bytes as 64-bit stores (QSB_C3_ST2) */
+        #pragma unroll
+        for(int j=0;j<4;j++)QSB_C3_ST2(&parkA2[j][tid],fa.words[4+2*j],fa.words[5+2*j]);
+        { const ulonglong2 b01=parkA2[4][tid],b23=parkA2[5][tid]; zB[0]=b01.x;zB[1]=b01.y;zB[2]=b23.x;zB[3]=b23.y; }
+        QSB_C3_ST2(&parkA2[4][tid],fa.words[12],fa.words[13]);
+        QSB_C3_ST2(&parkA2[5][tid],fa.words[14],fa.words[15]);
+#else
         #pragma unroll
         for(int j=0;j<4;j++)parkA2[j][tid]=make_ulonglong2(fa.words[4+2*j],fa.words[5+2*j]);
         { const ulonglong2 b01=parkA2[4][tid],b23=parkA2[5][tid]; zB[0]=b01.x;zB[1]=b01.y;zB[2]=b23.x;zB[3]=b23.y; }
         parkA2[4][tid]=make_ulonglong2(fa.words[12],fa.words[13]);
         parkA2[5][tid]=make_ulonglong2(fa.words[14],fa.words[15]);
+#endif
 #elif ZLAB_DUAL_EPOCH_SHA
         #pragma unroll
         for(int k=0;k<8;k++)parkA[k][tid]=fa.words[4+k];
@@ -3689,6 +3827,8 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
     qsb_block_inverse_tree_x<QSB_ROOT_LUT_SMEM,QsbPre3Idle,QSB_ROOT_WARP>(leaf,QsbPre3Idle{nB,parkA,tid});   /* 1/(WA*WB); pre3 in the root window */
 #elif QSB_ROOT_LUT_SMEM
     qsb_block_inverse_tree_x<1,QsbTreeNoIdle,QSB_ROOT_WARP>(leaf,QsbTreeNoIdle());   /* 1/(WA*WB) for this lane; table issued at kernel start */
+#elif QSB_ROOT_WARP
+    qsb_block_inverse_tree_x<0,QsbTreeNoIdle,QSB_ROOT_WARP>(leaf,QsbTreeNoIdle());   /* 1/(WA*WB); QSB_ROOT_WARP alone: the top of the tree on warp QSB_ROOT_WARP */
 #elif QSB_ROOT_FILL
     /* formed here, not at the top of the unit, so nothing new is live across the two front calls */
     const unsigned qsb_rf_next=qsb_rf_unit+gridDim.x;
@@ -3943,6 +4083,66 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
     }
     }
 #else /* !(ZLAB_K2S3M && QSB_TAIL_STAGGER): the base tails */
+#if QSB_C3_TAIL_ORDER
+    /* cut3 R3, QSB_C3_TAIL_ORDER (tree.cu): B's tail first, then A's (same calls on the same words) */
+    if(okB){
+        uint64_t inv[5];
+        QSB_TREE_MUL(inv,leaf,prodA);    /* 1/WB */
+#if ZLAB_K2S3M
+        int encoded=qsb_pair_tail3_value(nB[0],nB[1],nB[2],nB[3],nB[4],nB[5],nB[6],nB[7],nB[8],nB[9],nB[10],nB[11],inv[0],inv[1],inv[2],inv[3] QSB_R_PASS_TAIL(u2rx,u2ry));
+#else
+        int encoded=qsb_pair_tail_value(m1B[0],m1B[1],m1B[2],m1B[3],m2B[0],m2B[1],m2B[2],m2B[3],inv[0],inv[1],inv[2],inv[3],u2rx[0],u2rx[1],u2rx[2],u2rx[3],u2ry[0],u2ry[1],u2ry[2],u2ry[3]);
+#endif
+#ifdef QSB_FORCE_EXACT_HIT_CHECK
+        encoded=1; // Diagnostic only: ignore the speculative filter entirely.
+#endif
+        int recid=encoded-1;
+        if(encoded){
+            uint32_t pslot=atomicAdd(d_hit_cnt,1);
+            if(pslot<1024){
+                d_hit_idx[pslot*4]=((QSB_SC_EA0+1u)*(unsigned)QSB_SE_WINDOWS+(unsigned)lane)|((uint32_t)recid<<30);
+#if !QSB_HIT_NO_COMBO
+                for(int i=0;i<6;i++)d_hit_combos[pslot*ZLAB_HIT_REC+i]=QSB_SC_E1->early[i];
+                for(int i=0;i<3;i++)d_hit_combos[pslot*ZLAB_HIT_REC+6+i]=WIN3[lane][i];
+#endif
+            }
+        }
+    }
+    if(okA){
+#if ZLAB_K2S3M
+        uint64_t inv[5],n[12];
+        QSB_TREE_MUL(inv,leaf,prodB);    /* 1/WA */
+#if QSB_PARK128
+        #pragma unroll
+        for(int j=0;j<6;j++){ const ulonglong2 v=parkA2[j][tid]; n[2*j]=v.x; n[2*j+1]=v.y; }
+#else
+        #pragma unroll
+        for(int k=0;k<12;k++)n[k]=parkA[k][tid];
+#endif
+        int encoded=qsb_pair_tail3_value(n[0],n[1],n[2],n[3],n[4],n[5],n[6],n[7],n[8],n[9],n[10],n[11],inv[0],inv[1],inv[2],inv[3] QSB_R_PASS_TAIL(u2rx,u2ry));
+#else
+        uint64_t inv[5],m1[4],m2[4];
+        QSB_TREE_MUL(inv,leaf,prodB);    /* 1/WA */
+        #pragma unroll
+        for(int k=0;k<4;k++){m1[k]=parkA[k][tid];m2[k]=parkA[4+k][tid];}
+        int encoded=qsb_pair_tail_value(m1[0],m1[1],m1[2],m1[3],m2[0],m2[1],m2[2],m2[3],inv[0],inv[1],inv[2],inv[3],u2rx[0],u2rx[1],u2rx[2],u2rx[3],u2ry[0],u2ry[1],u2ry[2],u2ry[3]);
+#endif
+#ifdef QSB_FORCE_EXACT_HIT_CHECK
+        encoded=1; // Diagnostic only: ignore the speculative filter entirely.
+#endif
+        int recid=encoded-1;
+        if(encoded){
+            uint32_t pslot=atomicAdd(d_hit_cnt,1);
+            if(pslot<1024){
+                d_hit_idx[pslot*4]=(QSB_SC_EA0*(unsigned)QSB_SE_WINDOWS+(unsigned)lane)|((uint32_t)recid<<30);
+#if !QSB_HIT_NO_COMBO
+                for(int i=0;i<6;i++)d_hit_combos[pslot*ZLAB_HIT_REC+i]=QSB_SC_E0->early[i];
+                for(int i=0;i<3;i++)d_hit_combos[pslot*ZLAB_HIT_REC+6+i]=WIN3[lane][i];
+#endif
+            }
+        }
+    }
+#else
     if(okA){
 #if ZLAB_K2S3M
         uint64_t inv[5],n[12];
@@ -4000,6 +4200,7 @@ __global__ void __launch_bounds__(256, 2) kernel_digest(
             }
         }
     }
+#endif   /* QSB_C3_TAIL_ORDER */
 #endif /* QSB_TAIL_STAGGER */
 #if QSB_ROOT_FILL
     qsb_rf_pre=qsb_rf_has_next;
@@ -5902,6 +6103,8 @@ static void qsb_table_l2_window(cudaStream_t *streams, int n_streams,
  * a knob that is not defined in this configuration stringifies to its own name. */
 #if QSB_SHA_W0FOLD || QSB_SHA_UEXIT   /* lane SHA knobs appear only when set, so the default string is unchanged */
 #define QSB_XSHA_KNOBS QSB_CARRIER_KV(QSB_SHA_W0FOLD) QSB_CARRIER_KV(QSB_SHA_UEXIT)
+#elif QSB_CC_GLUE   /* QSB_CC_GLUE: likewise only when set */
+#define QSB_XSHA_KNOBS QSB_CARRIER_KV(QSB_CC_GLUE)
 #else
 #define QSB_XSHA_KNOBS
 #endif
@@ -5987,7 +6190,26 @@ static void qsb_table_l2_window(cudaStream_t *streams, int n_streams,
 #else
 #define QSB_K16_CODE_ROLL
 #endif
-#define QSB_CARRIER_KNOBS_16 QSB_SYS_KNOBS QSB_LEA_KNOBS QSB_K16_POOL_RCONST QSB_K16_EC_PSI_ZZ QSB_ROOT_LANE_KNOBS QSB_K16_LOSS QSB_XSHA_KNOBS QSB_K16_FOLD_REG QSB_K16_YP_DC QSB_K16_CODE_ROLL
+/* cut3 R3: the QSB_C3_TREE_* / QSB_C3_TAIL_* knobs enter the string only when nonzero (0 = the base image byte for byte) */
+#if QSB_C3_TREE_GLUE
+#define QSB_K16_C3R3_TREE QSB_CARRIER_KV(QSB_C3_TREE_GLUE)
+#else
+#define QSB_K16_C3R3_TREE
+#endif
+#if QSB_C3_TAIL_ORDER
+#define QSB_K16_C3R3_ORDER QSB_CARRIER_KV(QSB_C3_TAIL_ORDER)
+#else
+#define QSB_K16_C3R3_ORDER
+#endif
+#define QSB_K16_C3_R3 QSB_K16_C3R3_TREE QSB_K16_C3R3_ORDER
+/* ==== cut3 R2: QSB_C3_SHA_WIN in the knob string only when non-zero ==== */
+#if QSB_C3_SHA_WIN
+#define QSB_K16_C3_SHA QSB_CARRIER_KV(QSB_C3_SHA_WIN)
+#else
+#define QSB_K16_C3_SHA
+#endif
+/* ==== end cut3 R2 knob string ==== */
+#define QSB_CARRIER_KNOBS_16 QSB_SYS_KNOBS QSB_LEA_KNOBS QSB_K16_POOL_RCONST QSB_K16_EC_PSI_ZZ QSB_ROOT_LANE_KNOBS QSB_K16_LOSS QSB_XSHA_KNOBS QSB_K16_FOLD_REG QSB_K16_YP_DC QSB_K16_CODE_ROLL QSB_K16_C3_R3 QSB_K16_C3_SHA
 #ifdef QSB_CARRIER_BUILD   /* only the image carries it; the host keeps the string */
 __device__ __constant__ char qsb_carrier_knobs[] = QSB_CARRIER_KNOBS;
 #endif
