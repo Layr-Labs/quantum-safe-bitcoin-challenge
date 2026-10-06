@@ -7668,7 +7668,7 @@ int main(int argc, char **argv) {
 #endif
 
             /* Check if another GPU found it */
-            if ((total_searched % (50*1024*1024)) < (uint64_t)BATCH) {
+            if (num_gpus > 1 && (total_searched % (50*1024*1024)) < (uint64_t)BATCH) {
                 char check[256];
                 for (int g = 0; g < num_gpus; g++) {
                     if (g == gpu_index) continue;
@@ -7811,7 +7811,7 @@ int main(int argc, char **argv) {
             }
 
             /* Check if another GPU found it */
-            if ((total_searched % (50*1024*1024)) < (uint64_t)BATCH) {
+            if (num_gpus > 1 && (total_searched % (50*1024*1024)) < (uint64_t)BATCH) {
                 char check[256];
                 for (int g = 0; g < num_gpus; g++) {
                     if (g == gpu_index) continue;
