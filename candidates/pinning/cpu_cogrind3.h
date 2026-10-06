@@ -53,7 +53,7 @@ static cpu_set_t g_worker_set; static int g_worker_set_on = 0;
 
 /* ---------------- configuration ---------------- */
 #ifndef QSB_CG_B
-#define QSB_CG_B 2048                     /* candidates (locktimes) per chunk = inversion batch */
+#define QSB_CG_B 4096                     /* experiment: candidate count per chunk / inversion batch */
 #endif
 #define QSB_CG_BMAX QSB_CG_B
 #ifndef QSB_CG_PF
