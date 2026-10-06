@@ -8,7 +8,7 @@
 #endif
 /* l2state variant fkF20c8 + split retry */
 #ifndef QSB_SUB_FINE
-#define QSB_SUB_FINE 1
+#define QSB_SUB_FINE 0 /* dukemawex 960e87fb: sub-batch 65536 -> 131072 (qsb_root_fused<8>); carrier rebuilt with build_carrier.sh 24 */
 #endif
 #if QSB_SUB_FINE
 #define QSB_SUBPIPE 65536
