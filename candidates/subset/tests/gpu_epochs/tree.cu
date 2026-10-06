@@ -651,7 +651,7 @@ __device__ uint64_t BINOM_C[151][10];
  * 128-bit shared accesses instead of four 64-bit ones (the pinning record's QSB_POST_GLUE bit 1 layout). Same words,
  * same nodes, same products in the same order: bit-identical. Same 24 KiB of shared memory. 0 = the base byte for byte. */
 #ifndef QSB_TREE_ROW128
-#define QSB_TREE_ROW128 1
+#define QSB_TREE_ROW128 0
 #endif
 #if QSB_TREE_ROW128 != 0 && QSB_TREE_ROW128 != 1
 #error "QSB_TREE_ROW128 must be 0 or 1"
@@ -1014,7 +1014,7 @@ static int qsb_rf_grid_n = 0;              /* host: the persistent grid (set fro
 #define QSB_DIVSTEP_4LANE 1
 #endif
 #ifndef QSB_ROOT_COMBINE
-#define QSB_ROOT_COMBINE 0
+#define QSB_ROOT_COMBINE 1
 #endif
 /* QSB_ROOT_COMBINE's protocol knobs (file scope so the host pass and the image stringify the same values;
  * all are in QSB_CARRIER_KNOBS). RING: ring slots (power of two). CLAIM_POLLS x CLAIM_NS: how long a posted

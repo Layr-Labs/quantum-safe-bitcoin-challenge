@@ -138,7 +138,7 @@
 #error "QSB_ZZ3_LATE must be 0 or 1"
 #endif
 #ifndef QSB_SC_OPS
-#define QSB_SC_OPS 48
+#define QSB_SC_OPS 52
 #endif
 #if QSB_SC_OPS < 0 || QSB_SC_OPS > 127
 #error "QSB_SC_OPS is a 7-bit mask"
