@@ -7491,9 +7491,11 @@ int main(int argc, char **argv) {
 #endif
         qsb_ab_slot_t grp_slot[QSB_SEQ_GROUP];
         memset(grp_slot, 0, sizeof(grp_slot));
+        /* The tail prestate is invariant across all 256 byte-zero values in
+         * this sequence group; only r01 depends on ab_b0. */
+        for (int k = 0; k < QSB_SEQ_GROUP; k++) grp_slot[k].tp = grp_tp[k];
         for (uint32_t ab_b0 = 0; ab_b0 < 256u; ab_b0++) {
         for (int k = 0; k < QSB_SEQ_GROUP; k++) {
-            grp_slot[k].tp = grp_tp[k];
             grp_slot[k].r01 = qsb_tail_r01(grp_tp[k], tail_w0 | ab_b0);
         }
         for (uint32_t lt_off = 0; lt_off < ab_hn; lt_off += batch_lts) {
