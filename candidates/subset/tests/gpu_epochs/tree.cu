@@ -573,6 +573,20 @@ __device__ uint64_t BINOM_C[151][10];
 #if QSB_Q_SPREAD && QSB_Q_MIX != 4
 #error "QSB_Q_SPREAD is written for QSB_Q_MIX 4"
 #endif
+/* QSB_P_G12 (experiment, default 0; needs QSB_Q_MIX, the ZDEC walker and the rolled chain): P decodes with the six
+ * GLV12 terms (segment 0-3 hot, 4 and 5 cold) on every warp instead of the five P18 terms (segment 0 hot, 6, 7, 4, 5
+ * cold): two fewer cold records and one more field addition per candidate. P18's middle digits telescope to the
+ * same constant as GLV12's (the QSB_Q_P18 identity), so P sums to the same point and every candidate's z*A is
+ * unchanged. Only the shared P tail of the walk table changes (QSB_S3_MXF_PTAIL_INIT); the chain loop, the psi
+ * entry test and the last term are untouched. With QSB_Q_MIX m the warps split into (Q P18, P GLV12): 6 cold /
+ * 10 adds and (Q GLV12, P GLV12): 4 cold / 11 adds, i.e. 1/m of the warps on the GLV12 decode throughout: the
+ * per-warp profiles of a P-side mix on top of QSB_Q_MIX 1. 0 = the P18 tail byte for byte. */
+#ifndef QSB_P_G12
+#define QSB_P_G12 0
+#endif
+#if QSB_P_G12 != 0 && QSB_P_G12 != 1
+#error "QSB_P_G12 must be 0 or 1"
+#endif
 /* QSB_PSI_HOIST (default 0: every form failed the register gate on this tree, see below).
  * Bit 0 is the nested-loop form of the public QSB_BETA_OUT (fdd6302e) and QSB_PHI_HOIST (aabc3509) for
  * the QSB_Q_MIX rolled chain loop (QSB_SC_PP 0); no effect under QSB_SC_PP or QSB_Q_MIX 0.
@@ -1893,7 +1907,22 @@ __device__ __constant__ qsb_s3_desc_t QSB_S3_DESC[GT_GLV_TERMS] = QSB_S3_DESC_IN
  * [11..15] the P tail both share (P18: segments 0,6,7,4,5). Row g walks from 5g; entry 5 and entry 11
  * are the same segment-0 descriptor, so the P18 row jumps 5 -> 11 at its psi term. */
 #define QSB_S3_MXF_PTAIL 11u
+#if QSB_P_G12 && (!QSB_GLV_ZDEC || QSB_PSI_HOIST)
+#error "QSB_P_G12 is written for the ZDEC rolled walk with QSB_PSI_HOIST 0"
+#endif
+/* QSB_P_G12: the shared P tail [11..] is P's six GLV12 terms (segments 0-5) instead of the five P18 terms, so LAST
+ * moves from 15 to 16; the last entry is segment 5 in both forms (the chain issues it as immediates). */
+#define QSB_S3_DPLAIN(mask, centre, off, width) {mask, centre, off, width}
+#if QSB_P_G12
+#define QSB_S3_MXF_LAST 16u
+#define QSB_S3_MXF_PTAIL_INIT(E) E(0x3FFFFu,0u,0u,18u), E(0x7FFFFu,1u<<19,262144u,19u), \
+ E(0x3FFFFu,1u<<18,524288u,18u), E(0x3FFFFu,1u<<18,655360u,18u), E(0x7FFFFFFu,1u<<27,786432u,27u), \
+ E(0xFFFFFFFu,170559770u,67895296u,28u)
+#else
 #define QSB_S3_MXF_LAST 15u
+#define QSB_S3_MXF_PTAIL_INIT(E) E(0x3FFFFu,0u,0u,18u), E(0x7FFFFFFu,1u<<27,153175181u,27u), \
+ E(0xFFFFFFFu,1u<<28,220284045u,28u), E(0x7FFFFFFu,1u<<27,786432u,27u), E(0xFFFFFFFu,170559770u,67895296u,28u)
+#endif
 #define QSB_S3_DESC_MXF_INIT { \
  {0x3FFFFu,0u,0u,18u}, \
  {0x7FFFFFFu,1u<<27,153175181u,27u}, \
@@ -1906,11 +1935,7 @@ __device__ __constant__ qsb_s3_desc_t QSB_S3_DESC[GT_GLV_TERMS] = QSB_S3_DESC_IN
  {0x3FFFFu,1u<<18,655360u,18u}, \
  {0x7FFFFFFu,1u<<27,786432u,27u}, \
  {0xFFFFFFFu,170559770u,67895296u,28u}, \
- {0x3FFFFu,0u,0u,18u}, \
- {0x7FFFFFFu,1u<<27,153175181u,27u}, \
- {0xFFFFFFFu,1u<<28,220284045u,28u}, \
- {0x7FFFFFFu,1u<<27,786432u,27u}, \
- {0xFFFFFFFu,170559770u,67895296u,28u}}
+ QSB_S3_MXF_PTAIL_INIT(QSB_S3_DPLAIN)}
 __device__ __constant__ qsb_s3_desc_t QSB_S3_DESC_MXF[QSB_S3_MXF_LAST + 1u] = QSB_S3_DESC_MXF_INIT;
 #endif
 #if QSB_GLV_ZDEC
@@ -1933,11 +1958,7 @@ __device__ __constant__ qsb_s3_desc_t QSB_S3_DESC_MXF[QSB_S3_MXF_LAST + 1u] = QS
  QSB_S3_ZD(0x3FFFFu,1u<<18,655360u,18u), \
  QSB_S3_ZD(0x7FFFFFFu,1u<<27,786432u,27u), \
  QSB_S3_ZD(0xFFFFFFFu,170559770u,67895296u,28u), \
- QSB_S3_ZD(0x3FFFFu,0u,0u,18u), \
- QSB_S3_ZD(0x7FFFFFFu,1u<<27,153175181u,27u), \
- QSB_S3_ZD(0xFFFFFFFu,1u<<28,220284045u,28u), \
- QSB_S3_ZD(0x7FFFFFFu,1u<<27,786432u,27u), \
- QSB_S3_ZD(0xFFFFFFFu,170559770u,67895296u,28u)}
+ QSB_S3_MXF_PTAIL_INIT(QSB_S3_ZD)}
 __device__ __constant__ qsb_s3_desc_t QSB_S3_ZDESC_MXF[QSB_S3_MXF_LAST + 1u] = QSB_S3_ZDESC_MXF_INIT;
 #endif
 typedef struct { uint32_t w[8], signs; } qsb_s3_walker;
@@ -5043,6 +5064,17 @@ static void compute_gtable(uint8_t *gTable, const uint8_t neg_r_inv[32],
 #if QSB_GLV11
 /* Host self-check of the walker against q9_bigtbl_code (Q, GLV12 layout) or q11_bigtbl_code (Q under
  * QSB_Q_P18) and q11_bigtbl_code (P). */
+#if QSB_Q_MIX
+/* Terms per row of the QSB_Q_MIX walk (row 1 = Q on GLV12), psi term per row, and the reference code of term u:
+ * Q's part from q11_bigtbl_code (P18) or q9_bigtbl_code (GLV12), P's from q9_bigtbl_code under QSB_P_G12. */
+#define QSB_S3_ROW_N(g) ((g) ? 11 + QSB_P_G12 : 10 + QSB_P_G12)
+#define QSB_S3_ROW_PSI(g) ((g) ? 6 : 5)
+static uint32_t qsb_s3_row_want(unsigned g,int u,const uint64_t m[2][2],unsigned sp,unsigned sq) {
+ const int psi=QSB_S3_ROW_PSI(g);
+ if(u<psi) return g ? q9_bigtbl_code(m[1],sq,u) : q11_bigtbl_code(m[1],sq,u);
+ return QSB_P_G12 ? q9_bigtbl_code(m[0],sp,u-psi) : q11_bigtbl_code(m[0],sp,u-psi);
+}
+#endif
 static int qsb_s3_selfcheck(void) {
  static const qsb_s3_desc_t desc[GT_GLV_TERMS]=QSB_S3_DESC_INIT;
 #if QSB_Q_P18
@@ -5086,7 +5118,7 @@ static int qsb_s3_selfcheck(void) {
   if(g11[t].off!=gt_offset(c) || g11[t].mask!=(1u<<w)-1u) return 0;
   if(c!=5 && gt_entries(c)!=(1u<<(w-(c==0?0:1)))) return 0;
  }
- qsb_s3_desc_t sched[2][11]; int psi_at[2]={-1,-1}, n_at[2];
+ qsb_s3_desc_t sched[2][12]; int psi_at[2]={-1,-1}, n_at[2];
  for(unsigned g=0;g<2;g++) {
   int n=0;
   sched[g][n++]=desc[0];
@@ -5094,25 +5126,38 @@ static int qsb_s3_selfcheck(void) {
   for(unsigned i=5u*g+2u;i<QSB_S3_MXF_LAST;i++) {
    qsb_s3_desc_t d=mxf[i];
    if(d.off==0u) { if(psi_at[g]>=0) return 0; i=QSB_S3_MXF_PTAIL; psi_at[g]=n; }
-   if(n>=10) return 0;
+   if(n>=QSB_S3_ROW_N(g)-1) return 0;
    sched[g][n++]=d;
   }
   sched[g][n++]=desc[GT_GLV_TERMS-1];
   n_at[g]=n;
  }
- if(n_at[0]!=GT_GLV_TERMS || psi_at[0]!=QSB_S3_PSI_TERM || n_at[1]!=11 || psi_at[1]!=6) return 0;
+ if(n_at[0]!=QSB_S3_ROW_N(0) || psi_at[0]!=QSB_S3_ROW_PSI(0) || n_at[1]!=QSB_S3_ROW_N(1) || psi_at[1]!=QSB_S3_ROW_PSI(1))
+  return 0;
  if(memcmp(&mxf[QSB_S3_MXF_LAST],&desc[GT_GLV_TERMS-1],sizeof desc[0])!=0) return 0;
- if(memcmp(sched[0],desc,sizeof desc)!=0 || memcmp(sched[1],g11,sizeof g11)!=0) return 0;
+ {  /* each row is its Q list (P18: desc[0..4], GLV12: g11[0..5]) then its P list (P18: desc[5..9], GLV12: g11[0..5]) */
+  for(unsigned g=0;g<2;g++) {
+   const int psi=QSB_S3_ROW_PSI(g);
+   for(int t=0;t<n_at[g];t++) {
+    const qsb_s3_desc_t *r = t<psi ? (g ? &g11[t] : &desc[t])
+                                   : (QSB_P_G12 ? &g11[t-psi] : (g ? &g11[t] : &desc[t]));
+    if(memcmp(&sched[g][t],r,sizeof *r)!=0) return 0;
+   }
+  }
+ }
  for(int it=0;it<4096;it++) {
   uint64_t m[2][2];
   for(int j=0;j<2;j++) {seed^=seed<<13;seed^=seed>>7;seed^=seed<<17;m[j][0]=seed;
    seed^=seed<<13;seed^=seed>>7;seed^=seed<<17;m[j][1]=seed%0xa2a8918ca85bafe2ULL;
    if(it<4) {m[j][0]=it&1?~0ULL:0ULL;m[j][1]=it&2?0xa2a8918ca85bafe1ULL:0ULL;}}
-  unsigned sp=it&1,sq=(it>>1)&1;qsb_s3_walker h;qsb_s3_begin(h,m[0],sp,m[1],sq);
-  for(int t=0;t<11;t++) {
-   const uint32_t want=t<6 ? q9_bigtbl_code(m[1],sq,t) : q11_bigtbl_code(m[0],sp,t-6);
-   if(t==psi_at[1]) qsb_s3_psi_swap(h);
-   if(qsb_s3_code_half(h,t,sched[1][t])!=want) return 0;
+  unsigned sp=it&1,sq=(it>>1)&1;
+  for(unsigned g=0;g<2;g++) {
+   qsb_s3_walker h;qsb_s3_begin(h,m[0],sp,m[1],sq);
+   for(int t=0;t<n_at[g];t++) {
+    const uint32_t want=qsb_s3_row_want(g,t,m,sp,sq);
+    if(t==psi_at[g]) qsb_s3_psi_swap(h);
+    if(qsb_s3_code_half(h,t,sched[g][t])!=want) return 0;
+   }
   }
  }
 #if QSB_GLV_ZDEC
@@ -5151,22 +5196,19 @@ static int qsb_s3_selfcheck(void) {
     qsb_s3_walker h;qsb_s3_begin_z(h,v[0],mm[0],v[1]);
     int t=0;
     const qsb_s3_desc_t d0={0x3FFFFu,(mm[1]<<19)|1u,0u,18u};
-    uint32_t got[11];
+    uint32_t got[12];
     got[t++]=qsb_s3_code_z(h,d0);
     got[t++]=qsb_s3_code_z(h,zmx[5u*g+1u]);
     for(unsigned i=5u*g+2u;i<QSB_S3_MXF_LAST;i++) {
      qsb_s3_desc_t d=zmx[i];
      if(d.off==0u) {i=QSB_S3_MXF_PTAIL;qsb_s3_psi_swap_z(h);d.centre=h.signs;}
-     if(t>=10) return 0;
+     if(t>=QSB_S3_ROW_N(g)-1) return 0;
      got[t++]=qsb_s3_code_z(h,d);
     }
     got[t++]=qsb_s3_code_z(h,zlast);
-    if(t!=(g?11:GT_GLV_TERMS)) return 0;
-    for(int u=0;u<t;u++) {
-     const uint32_t want=g==0 ? (u<QSB_S3_PSI_TERM ? q11_bigtbl_code(m[1],sq,u) : q11_bigtbl_code(m[0],sp,u-QSB_S3_PSI_TERM))
-                              : (u<6 ? q9_bigtbl_code(m[1],sq,u) : q11_bigtbl_code(m[0],sp,u-6));
-     if(got[u]!=want) return 0;
-    }
+    if(t!=QSB_S3_ROW_N(g)) return 0;
+    for(int u=0;u<t;u++)
+     if(got[u]!=qsb_s3_row_want(g,u,m,sp,sq)) return 0;
 #if QSB_S3_NM_MASK || QSB_S3_NM_SEED
     {   /* QSB_S3_NM_MASK: the split walker (the chain's form) over the same schedule must give idx with bit 31
          * clear and nm a mask, and idx | (nm & 1) << 31 must be the packed code checked above. */
@@ -5987,7 +6029,12 @@ static void qsb_table_l2_window(cudaStream_t *streams, int n_streams,
 #else
 #define QSB_K16_CODE_ROLL
 #endif
-#define QSB_CARRIER_KNOBS_16 QSB_SYS_KNOBS QSB_LEA_KNOBS QSB_K16_POOL_RCONST QSB_K16_EC_PSI_ZZ QSB_ROOT_LANE_KNOBS QSB_K16_LOSS QSB_XSHA_KNOBS QSB_K16_FOLD_REG QSB_K16_YP_DC QSB_K16_CODE_ROLL
+#if QSB_P_G12   /* only when non-zero, so QSB_P_G12 0 keeps the record's image byte for byte */
+#define QSB_K16_P_G12 QSB_CARRIER_KV(QSB_P_G12)
+#else
+#define QSB_K16_P_G12
+#endif
+#define QSB_CARRIER_KNOBS_16 QSB_SYS_KNOBS QSB_LEA_KNOBS QSB_K16_POOL_RCONST QSB_K16_EC_PSI_ZZ QSB_ROOT_LANE_KNOBS QSB_K16_LOSS QSB_XSHA_KNOBS QSB_K16_FOLD_REG QSB_K16_YP_DC QSB_K16_CODE_ROLL QSB_K16_P_G12
 #ifdef QSB_CARRIER_BUILD   /* only the image carries it; the host keeps the string */
 __device__ __constant__ char qsb_carrier_knobs[] = QSB_CARRIER_KNOBS;
 #endif

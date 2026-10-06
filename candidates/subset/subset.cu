@@ -1,4 +1,6 @@
 #define QSB_REDRAW_09260102 1   /* inert re-measurement tag; unreferenced */
+#define QSB_P_G12 1   /* P decodes with the six GLV12 terms (segments 0-3 hot, 4-5 cold) instead of the five P18 terms */
+#define QSB_Q_MIX 1   /* every warp decodes Q with the six GLV12 terms */
 #ifndef QSB_FKLEAN_TAG_0924
 #define QSB_FKLEAN_TAG_0924 1 /* fk minus the IPC/pipe-routing switches */
 #endif
