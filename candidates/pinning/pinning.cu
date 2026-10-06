@@ -7289,6 +7289,14 @@ int main(int argc, char **argv) {
         if (se != cudaSuccess) { printf("CUDA error: %s\n", cudaGetErrorString(se)); return 1; }
     }
     uint32_t slot_seq[QSB_SLOTS]={0}, slot_lt[QSB_SLOTS]={0};
+#if QSB_ASICBOOST && QSB_AB_B0CONST
+    /* d_mid_slot[s] is private to slot stream s.  Once that stream's done
+     * event has completed, the uploaded sequence/b0 input remains valid until
+     * this host enqueues a different input for the same slot. */
+    uint32_t slot_mid_seq[QSB_SLOTS]={0}, slot_mid_b0[QSB_SLOTS]={0};
+    uint32_t slot_mid_pending_seq[QSB_SLOTS]={0}, slot_mid_pending_b0[QSB_SLOTS]={0};
+    int slot_mid_valid[QSB_SLOTS]={0}, slot_mid_pending_valid[QSB_SLOTS]={0};
+#endif
 #if QSB_PK_ON
     uint64_t slot_bno[QSB_SLOTS]={0}; uint32_t slot_bsz[QSB_SLOTS]={0};
 #endif
@@ -7307,6 +7315,14 @@ int main(int argc, char **argv) {
         slot_busy[s] = 0;
         err = cudaGetLastError();
         if (err != cudaSuccess) { printf("CUDA error: %s\n", cudaGetErrorString(err)); return 1; }
+#if QSB_ASICBOOST && QSB_AB_B0CONST
+        /* The completion event is behind the input copy and every consumer in
+         * the same stream.  Publish the witness only after both synchronization
+         * and CUDA error checks succeed. */
+        slot_mid_valid[s] = slot_mid_pending_valid[s];
+        slot_mid_seq[s] = slot_mid_pending_seq[s];
+        slot_mid_b0[s] = slot_mid_pending_b0[s];
+#endif
 #if QSB_CPU_GRIND && QSB_HOST_GATE
 #if QSB_PK_ON
         qcg::tick(qcg::mono_s(),(double)slot_bsz[s]);
@@ -7383,6 +7399,11 @@ int main(int argc, char **argv) {
         if (err != cudaSuccess) { printf("CUDA error: %s\n", cudaGetErrorString(err)); return 1; }
         err = cudaGetLastError();
         if (err != cudaSuccess) { printf("CUDA error: %s\n", cudaGetErrorString(err)); return 1; }
+#if QSB_ASICBOOST && QSB_AB_B0CONST
+        slot_mid_valid[s] = slot_mid_pending_valid[s];
+        slot_mid_seq[s] = slot_mid_pending_seq[s];
+        slot_mid_b0[s] = slot_mid_pending_b0[s];
+#endif
 #if QSB_COMPACT_READBACK
         count = slot_readback[s].count();
         const uint32_t *source = slot_readback[s].indices();
@@ -7524,9 +7545,17 @@ int main(int argc, char **argv) {
 
 #if QSB_ASICBOOST
 #if QSB_AB_B0CONST
-            memcpy(h_mid + (size_t)s*mid_words, grp_slot, sizeof(grp_slot));
-            cudaError_t slot_error = cudaMemcpyAsync(
-                d_mid_slot[s], h_mid + (size_t)s*mid_words, sizeof(grp_slot), cudaMemcpyHostToDevice, st);
+            cudaError_t slot_error = cudaSuccess;
+            if (!slot_mid_valid[s] || slot_mid_seq[s] != seq || slot_mid_b0[s] != ab_b0) {
+                memcpy(h_mid + (size_t)s*mid_words, grp_slot, sizeof(grp_slot));
+                slot_error = cudaMemcpyAsync(
+                    d_mid_slot[s], h_mid + (size_t)s*mid_words, sizeof(grp_slot), cudaMemcpyHostToDevice, st);
+            }
+            if (slot_error == cudaSuccess) {
+                slot_mid_pending_valid[s] = 1;
+                slot_mid_pending_seq[s] = seq;
+                slot_mid_pending_b0[s] = ab_b0;
+            }
 #else
             memcpy(h_mid + (size_t)s*mid_words, grp_tp, sizeof(grp_tp));
             cudaError_t slot_error = cudaMemcpyAsync(
