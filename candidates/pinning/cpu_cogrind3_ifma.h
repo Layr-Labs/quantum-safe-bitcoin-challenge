@@ -114,6 +114,42 @@ static QI_INL void fnorm(vfe *r) {
     t4 &= vs1(QI_M48);
     r->n[0] = t0; r->n[1] = t1; r->n[2] = t2; r->n[3] = t3; r->n[4] = t4;
 }
+/* Selected EC outputs are already weak-normalized: n0..n3 < 2^52 and
+ * n4 < 2^48 + 2^10.  Thus n4>>48 is only zero or one and the remaining
+ * 256-bit value needs at most the single secp256k1 p-boundary correction.
+ * This skips fnorm's general first fold/carry pass without weakening the
+ * canonical result. */
+static QI_INL void fnorm_weak(vfe *r) {
+    const V M = vs1(QI_M52);
+    V t0 = r->n[0], t1 = r->n[1], t2 = r->n[2], t3 = r->n[3], t4 = r->n[4];
+    V x = t4 >> 48; t4 &= vs1(QI_M48);                         /* x in {0, 1} */
+    const V ge = (V)_mm256_cmpgt_epi64((__m256i)t0, (__m256i)vs1(0xFFFFEFFFFFC2FULL - 1));
+    x |= (V)_mm256_cmpeq_epi64((__m256i)t4, (__m256i)vs1(QI_M48))
+       & (V)_mm256_cmpeq_epi64((__m256i)t3, (__m256i)M)
+       & (V)_mm256_cmpeq_epi64((__m256i)t2, (__m256i)M)
+       & (V)_mm256_cmpeq_epi64((__m256i)t1, (__m256i)M)
+       & ge & vs1(1);
+    t0 += (vs1(0) - x) & vs1(QI_C);
+    t1 += t0 >> 52; t0 &= M;
+    t2 += t1 >> 52; t1 &= M;
+    t3 += t2 >> 52; t2 &= M;
+    t4 += t3 >> 52; t3 &= M;
+    t4 &= vs1(QI_M48);
+    r->n[0] = t0; r->n[1] = t1; r->n[2] = t2; r->n[3] = t3; r->n[4] = t4;
+}
+static QI_INL V fparity_weak(const vfe *r) {
+    const V M = vs1(QI_M52);
+    const V t0 = r->n[0], t1 = r->n[1], t2 = r->n[2], t3 = r->n[3];
+    V t4 = r->n[4], x = t4 >> 48; t4 &= vs1(QI_M48);
+    const V ge = (V)_mm256_cmpgt_epi64((__m256i)t0, (__m256i)vs1(0xFFFFEFFFFFC2FULL - 1));
+    x |= (V)_mm256_cmpeq_epi64((__m256i)t4, (__m256i)vs1(QI_M48))
+       & (V)_mm256_cmpeq_epi64((__m256i)t3, (__m256i)M)
+       & (V)_mm256_cmpeq_epi64((__m256i)t2, (__m256i)M)
+       & (V)_mm256_cmpeq_epi64((__m256i)t1, (__m256i)M)
+       & ge & vs1(1);
+    return (t0 ^ x) & vs1(1);
+}
+
 /* QCG_Y_PARITY_PASS (kill switch, default 1): hash_block reads only bit 0 of a y's limb 0 (the
  * 02/03 prefix byte). fparity returns that bit of fnorm's canonical result without the second
  * carry pass: fnorm's final t0 is (t0 + x*C) mod 2^52 with x in {0, 1} its >= p flag and
@@ -400,8 +436,8 @@ static QI_FN void ec_batch(worker_t *w, vstate *vs) {
             fsub(&ym, &ym, &py[b]);
             vfe xp = px[b], yp = py[b];
 #if QCG_Y_PARITY_PASS && !defined(QCG_EC_HOOK)
-            fnorm(&xp); fnorm(&xm);
-            yp.n[0] = fparity(&py[b]); ym.n[0] = fparity(&ym);
+            fnorm_weak(&xp); fnorm_weak(&xm);
+            yp.n[0] = fparity_weak(&py[b]); ym.n[0] = fparity(&ym);
 #else
             fnorm(&xp); fnorm(&yp); fnorm(&xm); fnorm(&ym);
 #endif
