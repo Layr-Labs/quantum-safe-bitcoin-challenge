@@ -1,4 +1,7 @@
 #pragma once
+#ifndef QSB_INVERSE_CARRY_FOLD
+#define QSB_INVERSE_CARRY_FOLD 1
+#endif
 #ifndef QSB_INVERSE_CORRECTION
 #define QSB_INVERSE_CORRECTION 1
 #endif
@@ -96,12 +99,32 @@ __device__ __forceinline__ bool zi_inverse_limbs_bounded(uint64_t *R,int lane){
         const uint32_t prev0=__shfl_up_sync(mask,hi,1,8);
         const uint32_t prev=digit?prev0:0u;
         const uint32_t sum=lo+prev;
+#if QSB_INVERSE_CARRY_FOLD
+        const unsigned gen=__ballot_sync(mask,sum<lo);
+        const unsigned prop=__ballot_sync(mask,sum==0xffffffffu && digit!=0);
+        unsigned added,wrap;
+        // G31 and addition overflow are disjoint under gen & prop == 0.
+        // Private temporaries consume all inputs before either output is written.
+        asm("{ .reg .u32 a,w;\n\t"
+            "add.cc.u32 a,%2,%3;\n\t"
+            "addc.u32 w,%4,0;\n\t"
+            "mov.u32 %0,a;\n\t"
+            "mov.u32 %1,w;\n\t"
+            "}"
+            : "=r"(added),"=r"(wrap)
+            : "r"(prop),"r"(gen<<1),"r"(gen>>31));
+        const unsigned carry=(added^prop)|wrap;
+        const uint32_t low=sum+(digit?((carry>>lane)&1u):0u);
+        high+=(int64_t)__shfl_sync(mask,hi,start+7)-0x80000000LL;
+        high+=(int64_t)((carry>>((start+8)&31))&1u);
+#else
         const unsigned gen=(__ballot_sync(mask,sum<lo)>>start)&255u;
         const unsigned prop=(__ballot_sync(mask,sum==0xffffffffu)>>start)&255u;
         const unsigned carry=((prop+(gen<<1))^prop);
         const uint32_t low=sum+((carry>>digit)&1u);
         high+=(int64_t)__shfl_sync(mask,hi,start+7)-0x80000000LL;
         high+=(int64_t)((carry>>8)&1u);
+#endif
 #else
         const uint32_t lo=(uint32_t)acc;
         const int32_t hi=(int32_t)(acc>>32);

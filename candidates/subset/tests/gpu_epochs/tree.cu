@@ -5905,6 +5905,13 @@ static void qsb_table_l2_window(cudaStream_t *streams, int n_streams,
 #else
 #define QSB_XSHA_KNOBS
 #endif
+/* The reviewed folded inverse carry path participates in the existing carrier
+ * compatibility check only when enabled; disabled metadata stays BASE-exact. */
+#if defined(QSB_INVERSE_CARRY_FOLD) && QSB_INVERSE_CARRY_FOLD
+#define QSB_INVERSE_CARRY_FOLD_KNOBS QSB_CARRIER_KV(QSB_INVERSE_CARRY_FOLD)
+#else
+#define QSB_INVERSE_CARRY_FOLD_KNOBS
+#endif
 #define QSB_CARRIER_KNOBS QSB_CARRIER_KV(QSB_ZEROS_N) QSB_CARRIER_KV(QSB_S3) \
     QSB_CARRIER_KV(QSB_SE_WINDOWS) QSB_CARRIER_KV(QSB_SE_BLOCK) QSB_CARRIER_KV(MAX_T) \
     QSB_CARRIER_KV(QSB_950_PACK) QSB_CARRIER_KV(QSB_BATCH_AFFINE_FALLBACK) QSB_CARRIER_KV(QSB_BIGTBL) \
@@ -5954,7 +5961,7 @@ static void qsb_table_l2_window(cudaStream_t *streams, int n_streams,
     QSB_CARRIER_KV(QSB_DIVSTEP_4LANE) QSB_CARRIER_KV(QSB_GATE_FMA_RT) \
     QSB_CARRIER_KV(QSB_ROOT_COMBINE) QSB_CARRIER_KV(QSB_RC_RING) QSB_CARRIER_KV(QSB_RC_CLAIM_POLLS) \
     QSB_CARRIER_KV(QSB_RC_CLAIM_NS) QSB_CARRIER_KV(QSB_RC_SERVE_CYC) QSB_CARRIER_KV(QSB_RC_SLEEP_NS) \
-    QSB_CARRIER_KV(QSB_RC_DONE_NS) QSB_CARRIER_KV(QSB_RC_WAIT_CYC) QSB_CARRIER_KNOBS_16
+    QSB_CARRIER_KV(QSB_RC_DONE_NS) QSB_CARRIER_KV(QSB_RC_WAIT_CYC) QSB_CARRIER_KNOBS_16 QSB_INVERSE_CARRY_FOLD_KNOBS
 /* N-pkg16c: the stack's new switches enter the knob string only when non-zero, so the tree with every one of them at 0
  * builds N-pkg15's image byte for byte (knob string included), and any non-zero value is fingerprinted. */
 #if QSB_POOL_RCONST
