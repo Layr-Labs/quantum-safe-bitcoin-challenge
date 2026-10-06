@@ -35,7 +35,7 @@
  * QSB_HP_NOSHANI=1 forces the OpenSSL path; QSB_HP_WAIT_MS (default 40);
  * QSB_HP_CORRUPT=1 flips one host word of batch 0 (self-check test). */
 #ifndef QSB_HP_PLACE
-#define QSB_HP_PLACE 0   /* ercumentyildirim: 3 floating producers (the placement whose ring never starved on the ranked host), with the v3 code */
+#define QSB_HP_PLACE 1   /* experiment; 0 restores ercumentyildirim's 3 floating producers */
 #endif
 #ifndef QSB_HP_HELPER
 #define QSB_HP_HELPER 1

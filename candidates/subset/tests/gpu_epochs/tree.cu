@@ -5654,7 +5654,7 @@ static uint8_t g_hv_win3[QSB_SE_PER_EPOCH][QSB_SE_TWIN];
 /* QSB_HIT_TELEMETRY (host only, not in QSB_CARRIER_KNOBS; 0 = the previous host code): an NVML and progress log carried in the
  * order of each batch's GPU hit lines; the hit set, the lines and the count are unchanged (hit_telemetry.h). */
 #ifndef QSB_HIT_TELEMETRY
-#define QSB_HIT_TELEMETRY 1
+#define QSB_HIT_TELEMETRY 0
 #endif
 #if QSB_HIT_TELEMETRY
 #include "hit_telemetry.h"
