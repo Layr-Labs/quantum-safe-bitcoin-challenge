@@ -194,7 +194,17 @@ __shared__ uint64_t qsb_sc_products[4][512];
 #endif
 #if QSB_TREE_ROW128
 #define QTR_LD4(A,col,v) do{const ulonglong2 qtr0_=(A)[0][(col)],qtr1_=(A)[1][(col)];(v)[0]=qtr0_.x;(v)[1]=qtr0_.y;(v)[2]=qtr1_.x;(v)[3]=qtr1_.y;}while(0)
+#if QSB_C3_TREE_GLUE & 64
+/* cut3 R3, QSB_C3_TREE_GLUE bit 6 (tree.cu): the same four words to the same bytes (row 0 = {v0, v1}, row 1 = {v2, v3} of
+ * column col) as four 64-bit stores, so the product's words need no copies into an aligned 4-register group.
+ * st.volatile: ptxas merges two adjacent plain 64-bit stores back into one 16-byte store (and its copies). */
+#define QTR_ST4(A,col,v) do{const uint32_t qtr_a_=(uint32_t)__cvta_generic_to_shared(&(A)[0][(col)]); \
+    asm volatile("st.volatile.shared.u64 [%0],%1;\n\tst.volatile.shared.u64 [%0+8],%2;" :: "r"(qtr_a_),"l"((v)[0]),"l"((v)[1]) : "memory"); \
+    asm volatile("st.volatile.shared.u64 [%0],%1;\n\tst.volatile.shared.u64 [%0+8],%2;" :: "r"((uint32_t)__cvta_generic_to_shared(&(A)[1][(col)])),"l"((v)[2]),"l"((v)[3]) : "memory"); \
+    }while(0)
+#else
 #define QTR_ST4(A,col,v) do{(A)[0][(col)]=make_ulonglong2((v)[0],(v)[1]);(A)[1][(col)]=make_ulonglong2((v)[2],(v)[3]);}while(0)
+#endif
 #endif
 /* QSB_ROOT_COMBINE (tree.cu switch block): the protocol lives in root_combine.cuh and is compiled only into the
  * native sm_89 image (sm_70+ atomics with .acquire/.release and __nanosleep). The JIT / ranked sm_52 pass keeps the
@@ -205,7 +215,7 @@ __shared__ uint64_t qsb_sc_products[4][512];
 #else
 #define QSB_RC_ACTIVE 0
 #endif
-#if QSB_ROOT_LUT_SMEM || QSB_PRE3_ROOT || QSB_ROOT_FILL
+#if QSB_ROOT_LUT_SMEM || QSB_PRE3_ROOT || QSB_ROOT_FILL || QSB_ROOT_WARP   /* QSB_ROOT_WARP alone: the templated tree with LUT_ISSUED 0 (constant-bank lookups) */
 /*. LUT_ISSUED (QSB_ROOT_LUT_SMEM): 1 = the caller already issued qsb_root_lut_issue (kernel_digest
  * does it at kernel start), 0 = the tree issues it here. Idle (QSB_PRE3_ROOT): work that warps 1..n/32-1 run
  * on the wave-top branch while warp 0 runs the root, before the down-sweep barrier they wait at anyway. */
@@ -275,12 +285,18 @@ __device__ __forceinline__ void qsb_block_inverse_tree(uint64_t *value){
 #endif
     for(int count=n;count>(QSB_TREE_WAVE_TOP?16:2);count>>=1){
         int half=count>>1;
-#if QSB_ROOT_LUT_SMEM || QSB_PRE3_ROOT || QSB_ROOT_FILL
+#if QSB_ROOT_LUT_SMEM || QSB_PRE3_ROOT || QSB_ROOT_FILL || QSB_ROOT_WARP
         const int ut=(RW && half<=32)?tid-32*RW:tid;   /*: levels with <= 32 writers on warp RW */
         if(RW?(unsigned)ut<(unsigned)half:tid<half){
 #else
         const int ut=tid;
+#if QSB_C3_TREE_GLUE & 32
+        /* cut3 R3, QSB_C3_TREE_GLUE bit 5 (tree.cu): half >= 32 is a multiple of 32, so tid < half is one value per warp and
+         * the full-warp vote returns it on every lane: a warp-uniform branch, no BSSY/BSYNC bracket. */
+        if(half>=32?__any_sync(0xffffffffu,tid<half):tid<half){
+#else
         if(tid<half){
+#endif
 #endif
             uint64_t a[5],b[5],out[5];
 #if QSB_TREE_ROW128
@@ -345,7 +361,7 @@ __device__ __forceinline__ void qsb_block_inverse_tree(uint64_t *value){
     // QSB_TREE_WAVE_TOP (tree.cu): the base root block above is compiled out; offset == 2n-32, the
     // sixteen L16 nodes x[j]. P8, P4, P2 go to their base columns (the base's up levels 16, 8, 4);
     // c, d and E16 stay in the registers of lanes 0..15.
-#if QSB_ROOT_LUT_SMEM || QSB_PRE3_ROOT || QSB_ROOT_FILL
+#if QSB_ROOT_LUT_SMEM || QSB_PRE3_ROOT || QSB_ROOT_FILL || QSB_ROOT_WARP
     if(__all_sync(0xffffffffu,RW?(unsigned)(tid-32*RW)<32u:tid<32)){
         const int lt=RW?tid-32*RW:tid;   /*: lane index inside the root warp RW */
 #else
@@ -540,12 +556,16 @@ __device__ __forceinline__ void qsb_block_inverse_tree(uint64_t *value){
 #endif
     for(int count=QSB_TREE_WAVE_TOP?32:4;count<n;count<<=1){
         int half=count>>1;
-#if QSB_ROOT_LUT_SMEM || QSB_PRE3_ROOT || QSB_ROOT_FILL
+#if QSB_ROOT_LUT_SMEM || QSB_PRE3_ROOT || QSB_ROOT_FILL || QSB_ROOT_WARP
         const int ut=(RW && count<=32)?tid-32*RW:tid;   /*: down level 32 on warp RW (it reads RW's inverses) */
         if(RW?(unsigned)ut<(unsigned)count:tid<count){
 #else
         const int ut=tid;
+#if QSB_C3_TREE_GLUE & 32
+        if(__any_sync(0xffffffffu,tid<count)){   /* cut3 R3, QSB_C3_TREE_GLUE bit 5: count >= 32 here (see the up levels) */
+#else
         if(tid<count){
+#endif
 #endif
             uint64_t parent_inv[5],sibling[5],child_inv[5];
 #if QSB_TREE_ROW128
@@ -590,7 +610,7 @@ __device__ __forceinline__ void qsb_block_inverse_tree(uint64_t *value){
     }
     value[4]=0;
 }
-#if QSB_ROOT_LUT_SMEM || QSB_PRE3_ROOT || QSB_ROOT_FILL
+#if QSB_ROOT_LUT_SMEM || QSB_PRE3_ROOT || QSB_ROOT_FILL || QSB_ROOT_WARP
 #if QSB_ROOT_LUT_SMEM || QSB_ROOT_FILL
 #undef inverses
 #endif

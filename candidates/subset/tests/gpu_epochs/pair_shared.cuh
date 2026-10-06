@@ -744,32 +744,30 @@ __device__ __noinline__ QsbPairFront3 qsb_pair_front3_value(
 __device__ __forceinline__ int qsb_k2s_post3_gate_roll(
     uint64_t *n, uint64_t *inv, uint64_t *xR, uint64_t *yR
 ) {
-    uint64_t t[4], sum[4], m1[4], m2[4], x[4], p2[4];
+    uint64_t t[4], sum[4], m1[4], m2[4], m[4], x[4];
     uint64_t cc[4]={QSB_U2R_C[0],QSB_U2R_C[1],QSB_U2R_C[2],QSB_U2R_C[3]};
     QSB_FMUL(n + 8, n + 8, inv);   /* h = ZZ/W, formed once */
     QSB_FMUL(m1, n, n + 8);
     QSB_FMUL(m2, n + 4, n + 8);
     QSB_FADD(sum, m1, m2);
-    QSB_FSUB(t, m1, cc);
-    QSB_FMUL(x, sum, t);           /* p1 = (lambda1+m2)*(lambda1-c) */
-    uint32_t par = qsb_parity_product_window(x,m1,yR,1u);
-    QSB_FADD_XR(x, x, xR);         /* x1 = p1 + xR */
-    QSB_FSUB(t, m2, cc);
-    QSB_FMUL(p2, sum, t);          /* p2 = (lambda1+m2)*(m2-c) */
-    par |= qsb_parity_product_window(p2,m2,yR,0u) << 1;
-    /* Trip ri hashes recovery id ri. Trip 1 first does post3's last step for recovery id 1 (x2 = p2 + xR, the same
-     * add on the same words) and takes parity bit 1; the empty asm ties p2 to the trip so the add is not hoisted in
-     * front of the loop. Both trips always run (no early exit: the loop stays warp-uniform) and the first passing
-     * recovery id is kept, as in the unrolled gate. */
+    /* Codex continuation: roll each recid's post arithmetic with its gate.
+     * Select the unchanged raw slope words by value, then execute the same
+     * FSUB, FMUL, parity-window and FADD_XR for that recid. No canonicalization
+     * or arithmetic-helper change. Both trips run, preserving the first hit. */
     int res=0,ri=0;
     #pragma unroll 1
     for(;;){
-        if(ri){
-            #pragma unroll
-            for(int k=0;k<4;k++)asm("" : "+l"(p2[k]) : "r"(ri));
-            QSB_FADD_XR(x, p2, xR); /* x2 = p2 + xR */
-            par>>=1;
+        #pragma unroll
+        for(int k=0;k<4;k++) {
+            m[k]=ri?m2[k]:m1[k];
+            /* Identity dependency keeps each selected recid's post body in
+             * its trip, matching the inherited rolled gate's compiler tie. */
+            asm("" : "+l"(m[k]) : "r"(ri));
         }
+        QSB_FSUB(t, m, cc);
+        QSB_FMUL(x, sum, t);
+        uint32_t par=qsb_parity_product_window(x,m,yR,ri?0u:1u);
+        QSB_FADD_XR(x, x, xR);
         uint32_t pb[16],h;
         qsb_gate_block(pb,x,par);
 #if defined(QSB_GATE_FMA_RT) && QSB_GATE_FMA_RT
