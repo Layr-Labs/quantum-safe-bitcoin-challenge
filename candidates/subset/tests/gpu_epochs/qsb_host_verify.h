@@ -27,7 +27,7 @@
  * publication is dropped and counted (qsb_pub_dups). Disjoint epoch ranges make that count 0 by construction; the set
  * turns an enumeration bug into lost hits instead of a rejected run (one duplicate voids a run). 0 = the base. */
 #ifndef QSB_CPU_FENCE
-#define QSB_CPU_FENCE 0
+#define QSB_CPU_FENCE 1
 #endif
 #if QSB_CPU_FENCE
 #include <mutex>
