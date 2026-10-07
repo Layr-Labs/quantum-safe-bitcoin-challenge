@@ -19,44 +19,7 @@
 #ifndef QSB_HV_JOINT
 #define QSB_HV_JOINT 1
 #endif
-/* QSB_CPU_FENCE (host only, not an image knob): the co-grinder
- * grinds the GPU's own 128 window patterns on the epochs [F, C(137,6)) above a static, batch-aligned fence F, and the GPU
- * walks [0, F) and idles at F until the stop signal (tree.cu, CpuGrindSubset.h). It is defined here, the first header both
- * publishers include, because this file holds the one process-wide set of published hits both publish paths share: a
- * candidate (sorted skip set, recid; verify.py's canonical key) is written at most once per process, and a second
- * publication is dropped and counted (qsb_pub_dups). Disjoint epoch ranges make that count 0 by construction; the set
- * turns an enumeration bug into lost hits instead of a rejected run (one duplicate voids a run). 0 = the base. */
-#ifndef QSB_CPU_FENCE
-#define QSB_CPU_FENCE 0
-#endif
-#if QSB_CPU_FENCE
-#include <mutex>
-#include <unordered_set>
-static std::mutex qsb_pub_m;
-struct QsbPubKeyHash { size_t operator()(uint64_t k) const { k ^= k >> 33; k *= 0xff51afd7ed558ccdULL; k ^= k >> 33; return (size_t)k; } };
-static std::unordered_set<uint64_t, QsbPubKeyHash> *qsb_pub_set = nullptr;   /* leaked on purpose: the process _exits */
-static uint64_t qsb_pub_n = 0, qsb_pub_dups = 0;                            /* keys taken; publications dropped */
-/* The key: the sorted skip set's lexicographic rank among the 9-subsets of {0..149} (C(150, 9) < 2^47), times 2, plus the
- * recid. Exact and collision-free in 64 bits. qsb_pub_once: true (and the key recorded) when this candidate was not
- * published before in this process; false (and qsb_pub_dups counted) for a second publication. */
-static uint64_t qsb_pub_key(const uint8_t skip[9], int recid) {
-    uint8_t s[9]; memcpy(s, skip, 9);
-    for (int i = 1; i < 9; i++) { const uint8_t v = s[i]; int j = i; while (j > 0 && s[j - 1] > v) { s[j] = s[j - 1]; j--; } s[j] = v; }
-    static uint64_t C[151][10];                       /* C[n][k], n <= 150, k <= 9 (< 2^47): filled on first use, under qsb_pub_m */
-    if (!C[0][0]) for (int n = 0; n <= 150; n++) for (int k = 0; k <= 9; k++) C[n][k] = k == 0 ? 1 : n == 0 ? 0 : C[n - 1][k - 1] + C[n - 1][k];
-    uint64_t r = 0; int prev = -1;
-    for (int i = 0; i < 9; i++) { for (int j = prev + 1; j < s[i]; j++) r += C[150 - j - 1][9 - i - 1]; prev = s[i]; }
-    return r << 1 | (uint64_t)(recid & 1);
-}
-static bool qsb_pub_once(const uint8_t skip[9], int recid) {
-    std::lock_guard<std::mutex> g(qsb_pub_m);
-    const uint64_t k = qsb_pub_key(skip, recid);
-    if (!qsb_pub_set) { qsb_pub_set = new std::unordered_set<uint64_t, QsbPubKeyHash>(); qsb_pub_set->reserve(1u << 18); }
-    if (!qsb_pub_set->insert(k).second) { qsb_pub_dups++; return false; }
-    qsb_pub_n++;
-    return true;
-}
-#endif
+
 typedef struct {
     EC_GROUP *grp; BN_CTX *ctx; BIGNUM *order; BIGNUM *nri; EC_POINT *Ru2;
     const digest_params_t *dp;
@@ -147,9 +110,6 @@ static int qsb_hv_publish(const qsb_hv_t *h, uint64_t epoch_rank, unsigned lane,
     for (int j = 0; j < 3; j++) skip[6 + j] = h->win3[lane & (QSB_SE_PER_EPOCH - 1)][j];
     int recid = recid_gpu & 1;
     if (!qsb_hv_check(h, skip, recid)) { recid ^= 1; if (!qsb_hv_check(h, skip, recid)) return 0; }
-#if QSB_CPU_FENCE
-    if (!qsb_pub_once(skip, recid)) return 0;              /* published before in this process: dropped, counted */
-#endif
     char line[96];
     int wl = snprintf(line, sizeof line, "indices=%d,%d,%d,%d,%d,%d,%d,%d,%d recid=%d\n",
                       skip[0], skip[1], skip[2], skip[3], skip[4], skip[5], skip[6], skip[7], skip[8], recid);
@@ -158,24 +118,4 @@ static int qsb_hv_publish(const qsb_hv_t *h, uint64_t epoch_rank, unsigned lane,
     (*hit_counter)++;
     return 1;
 }
-#if QSB_HIT_TELEMETRY
-/* QSB_HIT_TELEMETRY (hit_telemetry.h): qsb_hv_publish with the write deferred. The same gate and the same first-publication
- * check; the line and its canonical key (nine indices, recid) go to *out, and the caller writes the batch's lines in its
- * chosen order. 1: published (counted), 0: not a hit or published before. */
-static int qsb_hv_publish_line(const qsb_hv_t *h, uint64_t epoch_rank, unsigned lane, int recid_gpu, qtel::Line *out, uint64_t *hit_counter) {
-    uint8_t skip[9];
-    qsb_host_unrank(epoch_rank, h->window_start, h->s_early, skip);
-    for (int j = 0; j < 3; j++) skip[6 + j] = h->win3[lane & (QSB_SE_PER_EPOCH - 1)][j];
-    int recid = recid_gpu & 1;
-    if (!qsb_hv_check(h, skip, recid)) { recid ^= 1; if (!qsb_hv_check(h, skip, recid)) return 0; }
-#if QSB_CPU_FENCE
-    if (!qsb_pub_once(skip, recid)) return 0;
-#endif
-    out->len = snprintf(out->text, sizeof out->text, "indices=%d,%d,%d,%d,%d,%d,%d,%d,%d recid=%d\n",
-                        skip[0], skip[1], skip[2], skip[3], skip[4], skip[5], skip[6], skip[7], skip[8], recid);
-    memcpy(out->key, skip, 9); out->key[9] = (uint8_t)recid;
-    (*hit_counter)++;
-    return 1;
-}
-#endif
 #endif /* QSB_HOST_VERIFY_H */
