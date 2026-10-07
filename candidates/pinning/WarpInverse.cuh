@@ -171,7 +171,7 @@ template<int BYTE> QWR_DEV int32_t qwr_by_signed_byte(uint32_t value){
 }
 
 #ifndef QSB_QWR_RATIO_MAD
-#define QSB_QWR_RATIO_MAD 0
+#define QSB_QWR_RATIO_MAD 2
 #endif
 
 QWR_DEV int32_t qwr_divstep30_column(int32_t delta,uint32_t f,uint32_t g,
