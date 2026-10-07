@@ -330,7 +330,7 @@ __global__ void __launch_bounds__(128,1) qsb_root_register(uint64_t *roots,int c
     uint64_t total[5];
     {
         uint64_t q[2][5];
-        #pragma unroll 1
+        #pragma unroll
         for(unsigned quartet=0;quartet<2;++quartet) {
 #if QSB_ROOT_WAVE
             if(wave && n>512u){
@@ -373,7 +373,7 @@ __global__ void __launch_bounds__(128,1) qsb_root_register(uint64_t *roots,int c
     /* Fetch BOTH pair products before writing a quartet's weighted outputs. */
     /* Both quartet orders are safe with this rule. This descending order */
     // consumes 4,5 before writing them, then consumes 2,3 before writing 0..3.
-    #pragma unroll 1
+    #pragma unroll
     for(int quartet=1;quartet>=0;--quartet) {
         uint64_t p01[5],p23[5],ip01[5],ip23[5];
         qbw_scratch_get(p01,roots,n,lane+(2u+2u*quartet)*128u);
