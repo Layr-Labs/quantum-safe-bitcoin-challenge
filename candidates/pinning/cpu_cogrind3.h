@@ -57,7 +57,7 @@ static cpu_set_t g_worker_set; static int g_worker_set_on = 0;
 #endif
 #define QSB_CG_BMAX QSB_CG_B
 #ifndef QSB_CG_PF
-#define QSB_CG_PF 4                       /* table prefetch distance, in 4-candidate blocks */
+#define QSB_CG_PF 2                       /* retained denominator/y cache: prefetch only next table window */
 #endif
 #define QSB_CG_MAXWIN 16
 #define QSB_CG_MAXW 256                   /* max worker threads */
@@ -146,6 +146,7 @@ struct shared_t {
     uint64_t dx_w[4], dy_w[4];            /* D = -2A */
     uint32_t w1_tmpl[16];                 /* suffix block 1 words with the locktime bytes cleared */
     int lt_word[4], lt_shift[4];          /* where locktime byte b lands in block 1 */
+    int lt_fast_right;                   /* immutable 0..32-bit shift when tfast is true */
     int hit_fd;
     std::atomic<uint64_t> next_chunk;
     std::atomic<uint64_t> cand_done;
@@ -374,10 +375,19 @@ static unsigned z_avx2_8(worker_t *w, int i0) {
     shared_t *S = g_cg;
     v8u lt = _mm256_add_epi32(_mm256_set1_epi32((int)(w->lt0 + (uint32_t)i0)), _mm256_setr_epi32(0, 1, 2, 3, 4, 5, 6, 7));
     v8u W[16];
-    for (int k = 0; k < 16; k++) W[k] = _mm256_set1_epi32((int)S->w1_tmpl[k]);
+    /* Structured compression reads only raw words 0 and 1; constants come from tplan. */
+    for (int k = 0, nk = w->tfast ? 2 : 16; k < nk; k++) W[k] = _mm256_set1_epi32((int)S->w1_tmpl[k]);
+    if (w->tfast) {
+        const v8u be = _mm256_shuffle_epi8(lt, _mm256_setr_epi8(
+            3,2,1,0,7,6,5,4,11,10,9,8,15,14,13,12,
+            3,2,1,0,7,6,5,4,11,10,9,8,15,14,13,12));
+        W[0] = _mm256_or_si256(W[0], _mm256_srlv_epi32(be, _mm256_set1_epi32(S->lt_fast_right)));
+        W[1] = _mm256_or_si256(W[1], _mm256_sllv_epi32(be, _mm256_set1_epi32(32 - S->lt_fast_right)));
+    } else {
     for (int b = 0; b < 4; b++) {
         v8u byte = _mm256_and_si256(_mm256_srli_epi32(lt, 8 * b), _mm256_set1_epi32(0xFF));
         W[S->lt_word[b]] = _mm256_or_si256(W[S->lt_word[b]], _mm256_sllv_epi32(byte, _mm256_set1_epi32(S->lt_shift[b])));
+    }
     }
     v8u st[8];
     if (w->tfast) s8_compress_plan<0x3u, 0>(st, W, w->tplan);      /* block 1 from the sequence midstate */
@@ -403,15 +413,18 @@ static void z_avx2_9(worker_t *w, int i0) {
     shared_t *S = g_cg;
     const uint32_t lt0 = w->lt0 + (uint32_t)i0;
     v8u lt = _mm256_add_epi32(_mm256_set1_epi32((int)lt0), _mm256_setr_epi32(0, 1, 2, 3, 4, 5, 6, 7));
-    v8u W[16];
-    uint32_t SW[16];
-    for (int k = 0; k < 16; k++) { W[k] = _mm256_set1_epi32((int)S->w1_tmpl[k]); SW[k] = S->w1_tmpl[k]; }
+    /* Called only with tfast: the plan consumes two raw message words. */
+    v8u W[2];
+    uint32_t SW[2];
+    for (int k = 0; k < 2; k++) { W[k] = _mm256_set1_epi32((int)S->w1_tmpl[k]); SW[k] = S->w1_tmpl[k]; }
     const uint32_t l9 = lt0 + 8u;
-    for (int b = 0; b < 4; b++) {
-        v8u byte = _mm256_and_si256(_mm256_srli_epi32(lt, 8 * b), _mm256_set1_epi32(0xFF));
-        W[S->lt_word[b]] = _mm256_or_si256(W[S->lt_word[b]], _mm256_sllv_epi32(byte, _mm256_set1_epi32(S->lt_shift[b])));
-        SW[S->lt_word[b]] |= ((l9 >> (8 * b)) & 0xFFu) << S->lt_shift[b];
-    }
+        const v8u be = _mm256_shuffle_epi8(lt, _mm256_setr_epi8(
+            3,2,1,0,7,6,5,4,11,10,9,8,15,14,13,12,
+            3,2,1,0,7,6,5,4,11,10,9,8,15,14,13,12));
+        W[0] = _mm256_or_si256(W[0], _mm256_srlv_epi32(be, _mm256_set1_epi32(S->lt_fast_right)));
+        W[1] = _mm256_or_si256(W[1], _mm256_sllv_epi32(be, _mm256_set1_epi32(32 - S->lt_fast_right)));
+    const uint64_t packed9 = ((uint64_t)__builtin_bswap32(l9) << 32) >> S->lt_fast_right;
+    SW[0] |= (uint32_t)(packed9 >> 32); SW[1] |= (uint32_t)packed9;
     v8u st[8];
     uint32_t ss[8];
     s9_compress_plan<0x3u, 0>(st, W, ss, SW, w->tplan);
@@ -433,17 +446,21 @@ static unsigned z_shani_2(worker_t *w, int i0) {
     uint32_t WA[16], WB[16];
     memcpy(WA, S->w1_tmpl, 64); memcpy(WB, S->w1_tmpl, 64);
     const uint32_t la = w->lt0 + (uint32_t)i0, lb = la + 1;
+    if (w->tfast) {
+        const uint64_t pa = ((uint64_t)__builtin_bswap32(la) << 32) >> S->lt_fast_right;
+        const uint64_t pb = ((uint64_t)__builtin_bswap32(lb) << 32) >> S->lt_fast_right;
+        WA[0] |= (uint32_t)(pa >> 32); WA[1] |= (uint32_t)pa;
+        WB[0] |= (uint32_t)(pb >> 32); WB[1] |= (uint32_t)pb;
+    } else {
     for (int b = 0; b < 4; b++) {
         WA[S->lt_word[b]] |= ((la >> (8 * b)) & 0xFF) << S->lt_shift[b];
         WB[S->lt_word[b]] |= ((lb >> (8 * b)) & 0xFF) << S->lt_shift[b];
     }
+    }
     uint32_t sa[8], sb[8];
     memcpy(sa, w->mid1, 32); memcpy(sb, w->mid1, 32);
     shani_compress2(sa, WA, sb, WB);
-    uint32_t DA[16] = {sa[0], sa[1], sa[2], sa[3], sa[4], sa[5], sa[6], sa[7], 0x80000000u, 0, 0, 0, 0, 0, 0, 256};
-    uint32_t DB[16] = {sb[0], sb[1], sb[2], sb[3], sb[4], sb[5], sb[6], sb[7], 0x80000000u, 0, 0, 0, 0, 0, 0, 256};
-    memcpy(sa, IV256, 32); memcpy(sb, IV256, 32);
-    shani_compress2(sa, DA, sb, DB);
+    shani_digest32_2(sa, sb);
     for (int k = 0; k < 4; k++) {
         w->zq[k][i0] = (uint64_t)sa[6 - 2 * k] << 32 | sa[7 - 2 * k];
         w->zq[k][i0 + 1] = (uint64_t)sb[6 - 2 * k] << 32 | sb[7 - 2 * k];
@@ -888,6 +905,7 @@ static int start(const pinning2_params_t *pp, uint32_t lt_min, uint32_t lt_max) 
         const uint64_t bits = (uint64_t)pp->total_preimage_len * 8;
         for (int b = 0; b < 8; b++) m[120 + 7 - b] = (uint8_t)(bits >> (8 * b));
         for (int i = 0; i < 16; i++) S->w1_tmpl[i] = (uint32_t)m[64 + 4 * i] << 24 | (uint32_t)m[64 + 4 * i + 1] << 16 | (uint32_t)m[64 + 4 * i + 2] << 8 | m[64 + 4 * i + 3];
+        S->lt_fast_right = 8 * ((int)pp->lt_offset - 64);
         for (int b = 0; b < 4; b++) { const int p = (int)pp->lt_offset + b - 64; S->lt_word[b] = p >> 2; S->lt_shift[b] = 8 * (3 - (p & 3)); }
     }
     mkdir("results", 0755);
