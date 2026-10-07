@@ -1,0 +1,24 @@
+{
+  "date": "2026-09-17",
+  "bend_version": "2.0.5",
+  "frontier_submission": "04664954-0e55-4def-943d-c5214b62e468",
+  "frontier_commit": "067302c",
+  "frontier_score": 686230583,
+  "source_sha256": {
+    "pinning.cu": "f0de8bce0750ce9cf9a6bdd3b9fc5b5097a88d8a0a3493a81874218e3b8e379b",
+    "GPUMath.h": "b22af2e24f8c2aa503b623447acf9292c44b6c68452aa22ab578c191e238cd0b"
+  },
+  "artifact_sha256": {
+    "LAWS.bend": "41a40c3f38d98f58366db44714953b5f2dbbe87d598345a72b171203ed4c2e01",
+    "PROOF.bend": "61b9c65dd44c9312caa30c29c159747fa9a2f1cc9328088a917d3a6d1e4df325",
+    "BROKEN.bend": "fec681692a37ddc60c903fa34a7ca03cb4d3fbc11c5e694538c6e16ec865ba80"
+  },
+  "proof_command": "/Users/nolan/.bend/bin/bend PROOF.bend",
+  "proof_result": "All terms check.",
+  "mutation_command": "/Users/nolan/.bend/bin/bend BROKEN.bend",
+  "mutation_result": "rejected: frontier_15_split remains open at dropped_chunk_8",
+  "backend": "Bend checker",
+  "gpu_execution": false,
+  "cuda_changed": false,
+  "submitted": false
+}
