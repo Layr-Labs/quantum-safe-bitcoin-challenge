@@ -5,18 +5,28 @@
 #ifndef QSB_950_PACK
 #define QSB_950_PACK 1
 #endif
+#if QSB_FIRST_COMPACT8 && QSB_SE_WINDOWS == 128
+#define QSB_FIRST_SLOTS 8
+#else
 #define QSB_FIRST_SLOTS (QSB_SE_WINDOWS==256?64:16)
+#endif
 #ifndef QSB_SHA_UNROLL_CONST
 #define QSB_SHA_UNROLL_CONST 1
 #endif   /* first-block classes per epoch in d_first */
 __device__ uint32_t QSB_WINDOW_FIRST[14][QSB_SE_PER_EPOCH];
+#if QSB_SECOND_COMPACT64 && QSB_SHA_SCHED_V4 && !QSB_SHA_WROLL_PIPE && QSB_SE_WINDOWS == 128
+#define QSB_WINDOW_SECOND_CAPACITY 64
+#else
+#define QSB_WINDOW_SECOND_CAPACITY QSB_SE_PER_EPOCH
+#endif
+#define QSB_WINDOW_SECOND_PITCH (QSB_WINDOW_SECOND_CAPACITY + QSB_WINDOW_ROW_PAD)
 #if QSB_SHA_SCHED_V4
 /* QSB_SHA_SCHED_V4: W+K word r of second-block slot s at [r/4][s].{x,y,z,w}, so a block's 8 rounds
  * read two 16 B words per lane instead of eight 4 B words; same 32 KiB, same values. */
 #if QSB_SHA_WROLL_PIPE
-__device__ uint4 QSB_WINDOW_SECOND[17][QSB_SE_PER_EPOCH];   /* QSB_SHA_WROLL_PIPE: row 16 is zero padding the pipelined roll reads once and discards (the host uploads rows 0..15) */
+__device__ uint4 QSB_WINDOW_SECOND[17][QSB_WINDOW_SECOND_PITCH];   /* QSB_SHA_WROLL_PIPE: row 16 is zero padding the pipelined roll reads once and discards (the host uploads rows 0..15) */
 #else
-__device__ uint4 QSB_WINDOW_SECOND[16][QSB_SE_PER_EPOCH];
+__device__ uint4 QSB_WINDOW_SECOND[16][QSB_WINDOW_SECOND_PITCH];
 #endif
 #define QSB_WSEC_V4(r, slot) (QSB_WINDOW_SECOND[(r) >> 2][slot])
 #else
@@ -48,7 +58,7 @@ static uint32_t qsb_window_first_key(const uint8_t w[3]) {
 
 static int qsb_prepare_window_schedule(const uint8_t *rows,
         const uint8_t windows[QSB_SE_PER_EPOCH][3], const uint32_t *constant) {
-    uint32_t first[14][QSB_SE_PER_EPOCH], second[64][QSB_SE_PER_EPOCH]={}, round_k[64];
+    uint32_t first[14][QSB_SE_PER_EPOCH], second[64][QSB_WINDOW_SECOND_CAPACITY]={}, round_k[64];
     uint32_t classes[QSB_SE_PER_EPOCH], unique[QSB_SE_PER_EPOCH][16];
     uint32_t first_classes[QSB_SE_PER_EPOCH], first_unique[QSB_SE_PER_EPOCH][14], transposed[14][QSB_SE_WINDOWS==256?256:QSB_FIRST_SLOTS]={};
     int first_distinct=0;
@@ -76,7 +86,10 @@ static int qsb_prepare_window_schedule(const uint8_t *rows,
         first_classes[lane]=first_slot;
         int slot=0;
         while(slot<distinct && memcmp(unique[slot],words+16,64))slot++;
-        if(slot==distinct){memcpy(unique[distinct],words+16,64);distinct++;}
+        if(slot==distinct){
+            if(distinct>=QSB_WINDOW_SECOND_CAPACITY)return 1;
+            memcpy(unique[distinct],words+16,64);distinct++;
+        }
         classes[lane]=slot;
         for (int j=0; j<16; j++) expanded[j]=words[j+16];
         for (int j=16; j<64; j++) {
@@ -107,9 +120,9 @@ static int qsb_prepare_window_schedule(const uint8_t *rows,
     if (QSB_TO_SYMBOL(QSB_WINDOW_FIRST,first,sizeof(first))!=cudaSuccess) return 1;
 #if QSB_SHA_SCHED_V4
     {   /* QSB_SHA_SCHED_V4: the same words in the [r/4][slot].{x,y,z,w} layout */
-        static uint4 second4[16][QSB_SE_PER_EPOCH];
+        static uint4 second4[16][QSB_WINDOW_SECOND_PITCH];
         for(int r=0;r<64;r+=4)
-            for(int slot=0;slot<QSB_SE_PER_EPOCH;slot++){
+            for(int slot=0;slot<QSB_WINDOW_SECOND_CAPACITY;slot++){
                 second4[r/4][slot].x=second[r][slot];   second4[r/4][slot].y=second[r+1][slot];
                 second4[r/4][slot].z=second[r+2][slot]; second4[r/4][slot].w=second[r+3][slot];
             }
@@ -404,15 +417,36 @@ __device__ __forceinline__ void qsb_scheduled_window_hash_pair(
     if(0)   /* the rolled loop replaces the loop below, which stays in the source as dead code (this form is the
              * measured one; an #else form reorders two moves) */
 #endif
+#if QSB_WINDOW_GROUP_ROUNDS
+#if QSB_WINDOW_ADDR_WALK
+    uint64_t qsb_window_addr=(uint64_t)&QSB_WINDOW_SECOND[0][slot];
+#endif
+    /* Keep a fixed group of rounds inline, and roll between groups. The inner
+     * group always ends on an eight-round state rotation boundary. This uses
+     * all original schedule words once, in their original order. */
+    #pragma unroll 1
+    for(int group=0;group<64;group+=QSB_WINDOW_GROUP_ROUNDS){
+        #pragma unroll
+        for(int offset=0;offset<QSB_WINDOW_GROUP_ROUNDS;offset+=8){
+#if !QSB_WINDOW_ADDR_WALK
+            const int r=group+offset;
+#endif
+#else
 #if QSB_PAIR_SHA_UNROLL_WINDOW   /* exact: same rounds, no loop counter, loads can be hoisted */
     #pragma unroll
 #else
     #pragma unroll 1
 #endif
     for(int r=0;r<64;r+=8){
+#endif
 #if QSB_SHA_SCHED_V4
         /* QSB_SHA_SCHED_V4: two 16 B loads carry the 8 rounds' W+K words; the same words in the same order */
+#if QSB_WINDOW_ADDR_WALK
+        const uint4 wa=*reinterpret_cast<const uint4*>(qsb_window_addr+(uint64_t)(offset/4)*QSB_WINDOW_SECOND_PITCH*sizeof(uint4));
+        const uint4 wb=*reinterpret_cast<const uint4*>(qsb_window_addr+(uint64_t)(offset/4+1)*QSB_WINDOW_SECOND_PITCH*sizeof(uint4));
+#else
         const uint4 wa=QSB_WSEC_V4(r,slot), wb=QSB_WSEC_V4(r+4,slot);
+#endif
         {const uint32_t w=wa.x;S2Round(a0,b0,c0,d0,e0,f0,g0,h0,0,w);S2Round(a1,b1,c1,d1,e1,f1,g1,h1,0,w);}
         {const uint32_t w=wa.y;S2Round(h0,a0,b0,c0,d0,e0,f0,g0,0,w);S2Round(h1,a1,b1,c1,d1,e1,f1,g1,0,w);}
         {const uint32_t w=wa.z;S2Round(g0,h0,a0,b0,c0,d0,e0,f0,0,w);S2Round(g1,h1,a1,b1,c1,d1,e1,f1,0,w);}
@@ -432,6 +466,13 @@ __device__ __forceinline__ void qsb_scheduled_window_hash_pair(
         {const uint32_t w=QSB_WINDOW_SECOND[r+7][slot];S2Round(b0,c0,d0,e0,f0,g0,h0,a0,0,w);S2Round(b1,c1,d1,e1,f1,g1,h1,a1,0,w);}
 #endif
     }
+#if QSB_WINDOW_GROUP_ROUNDS
+#if QSB_WINDOW_ADDR_WALK
+        asm("add.u64 %0, %0, %1;" : "+l"(qsb_window_addr)
+            : "l"((uint64_t)(QSB_WINDOW_GROUP_ROUNDS/4)*QSB_WINDOW_SECOND_PITCH*sizeof(uint4)));
+#endif
+    }
+#endif
     QSB_PAIR_STATE_ADD();
 #if QSB_ROOT_FILL
     }
