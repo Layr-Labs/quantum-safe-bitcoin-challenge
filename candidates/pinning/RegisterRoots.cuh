@@ -234,27 +234,47 @@ __global__ void __launch_bounds__(256,1) qsb_root_register(uint64_t *roots,int c
 }
 #elif QSB_RROOT_ONEQ_ON
 
+#ifndef QSB_RROOT_KEEP_PAIRS
+#define QSB_RROOT_KEEP_PAIRS 1
+#endif
+#if QSB_RROOT_KEEP_PAIRS != 0 && QSB_RROOT_KEEP_PAIRS != 1
+#error "QSB_RROOT_KEEP_PAIRS must be 0 or 1"
+#endif
+/* Keep only the two quartet pair products across inversion. The input roots
+ * and nonzero flags retain their original short lifetime and reload path. */
+
 __global__ void __launch_bounds__(128,1) qsb_root_register(uint64_t *roots,int count) {
     if (count<=0 || count>QSB_RROOT_CAP) return;
     const unsigned n=(unsigned)count;
     const unsigned lane=threadIdx.x;
     uint64_t total[5];
+#if QSB_RROOT_KEEP_PAIRS
+    uint64_t p01[5],p23[5];
+#endif
     {
-        uint64_t p01[5],p23[5],a[5],b[5];
+#if !QSB_RROOT_KEEP_PAIRS
+        uint64_t p01[5],p23[5];
+#endif
+        uint64_t a[5],b[5];
         qbw_root_load(a,roots,lane,n);
         qbw_root_load(b,roots,lane+128u,n);
         qsb_field_mul(p01,a,b);p01[4]=0;
         qbw_root_load(a,roots,lane+256u,n);
         qbw_root_load(b,roots,lane+384u,n);
         qsb_field_mul(p23,a,b);p23[4]=0;
+#if !QSB_RROOT_KEEP_PAIRS
         qbw_scratch_put(roots,n,lane+256u,p01);
         qbw_scratch_put(roots,n,lane+384u,p23);
+#endif
         qsb_field_mul(total,p01,p23);total[4]=0;
     }
     qsb_block_inverse_register_n<128>(total);
-    uint64_t p01[5],p23[5],ip01[5],ip23[5];
+    uint64_t ip01[5],ip23[5];
+#if !QSB_RROOT_KEEP_PAIRS
+    uint64_t p01[5],p23[5];
     qbw_scratch_get(p01,roots,n,lane+256u);
     qbw_scratch_get(p23,roots,n,lane+384u);
+#endif
     qsb_field_mul(ip01,total,p23);ip01[4]=0;
     qsb_field_mul(ip23,total,p01);ip23[4]=0;
     #pragma unroll

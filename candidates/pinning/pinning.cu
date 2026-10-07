@@ -15,12 +15,29 @@
 #else
 #define QSB_SUBPIPE 131072
 #endif
-#define QSB_SUBRING 4 /* SUBRING 4 + SLOTS 5: host pipeline depth measured on intel-r5 (ercumentyildirim 127d95d4) */
+#ifndef QSB_SUBRING
+#define QSB_SUBRING 6
+#endif
+#if QSB_SUBRING != 3 && QSB_SUBRING != 4 && QSB_SUBRING != 6
+#error "QSB_SUBRING must be 3, 4 or 6 for the state-ring experiment"
+#endif
+/* Ring6 increases simultaneously allocated state to six independent reuse slots.
+ * Every reused ring still waits for its previous finish before prepare writes it.
+ * Ring6 reuses the same prepare/root/finish lane after six sub-batches; saved role contexts remain unchanged.
+ * Candidate enumeration, kernel math and the monolithic fallback are unchanged. */
 #define QSB_ROOT_FUSED 1
 #ifndef QSB_PERSIST_WINDOW_CAP
 #define QSB_PERSIST_WINDOW_CAP (36u<<20) /* 36 MiB as in ercumentyildirim b62c41b8; HY6 arm (after ercumentyildirim #1892, cefika 482a55e6): 42 MiB table window under an unchanged persisting set-aside; 0 = the base */
 #endif
-#define QSB_L2STATE 1033 /* 1 | 8 (state stores evict_last) | 1024 (finish discards consumed state lines); from PR #1891 */
+#ifndef QSB_FINISH_STATE_CG
+#define QSB_FINISH_STATE_CG 1
+#endif
+#if QSB_FINISH_STATE_CG != 0 && QSB_FINISH_STATE_CG != 1
+#error "QSB_FINISH_STATE_CG must be 0 or 1"
+#endif
+/* Combine plain cg state loads with the existing token-ordered early discard.
+ * Control0 retains the original evict-first hinted state loads. */
+#define QSB_L2STATE (1033 | (QSB_FINISH_STATE_CG * 512))
 #ifndef QSB_GREEN
 #define QSB_GREEN 20 /* finish green partition 22 -> 20 SMs (8 shared): the cheaper MLATE/CHORD/SUMU finish fits the crown's partition again; host only */
 #endif
@@ -548,13 +565,50 @@ static_assert(QSB_COMPLETION_MODE >= 0 && QSB_COMPLETION_MODE <= 3, "completion 
 #define QSB_SUBPIPE 0
 #endif
 #ifndef QSB_SUBRING
-#define QSB_SUBRING 3
+#define QSB_SUBRING 6
 #endif
 #ifndef QSB_SUB_S2PRIO
 #define QSB_SUB_S2PRIO 1
 #endif
 #ifndef QSB_L2STATE
 #define QSB_L2STATE 0
+#endif
+#ifndef QSB_DISCARD_BEFORE_FINISH
+#define QSB_DISCARD_BEFORE_FINISH 1
+#endif
+#ifndef QSB_DISCARD_LEADER_STEP
+#define QSB_DISCARD_LEADER_STEP 16
+#endif
+#if QSB_DISCARD_LEADER_STEP != 8 && QSB_DISCARD_LEADER_STEP != 16
+#error "QSB_DISCARD_LEADER_STEP must be 8 or 16"
+#endif
+/* Step16 retires alternating consumed-state cache lines. Other lines use
+ * ordinary eviction; all vector loads, recovery math and hit stores remain. */
+#ifndef QSB_DISCARD_PLANE_MASK
+#define QSB_DISCARD_PLANE_MASK 12
+#endif
+#if QSB_DISCARD_PLANE_MASK != 12 && QSB_DISCARD_PLANE_MASK != 15
+#error "QSB_DISCARD_PLANE_MASK must be 12 or 15"
+#endif
+/* Mask12 retires only consumed v-state planes; y planes use ordinary eviction.
+ * The four complete state loads and their synchronized token stay unchanged. */
+#ifndef QSB_DISCARD_LOAD_TOKEN
+#define QSB_DISCARD_LOAD_TOKEN 1
+#endif
+#if QSB_DISCARD_LOAD_TOKEN != 0 && QSB_DISCARD_LOAD_TOKEN != 1
+#error "QSB_DISCARD_LOAD_TOKEN must be 0 or 1"
+#endif
+#if QSB_FINISH_STATE_CG && !QSB_DISCARD_BEFORE_FINISH
+#error "QSB_FINISH_STATE_CG requires early consumed-state discard"
+#endif
+#if QSB_DISCARD_LOAD_TOKEN && !QSB_DISCARD_BEFORE_FINISH
+#error "QSB_DISCARD_LOAD_TOKEN requires early consumed-state discard"
+#endif
+#if QSB_DISCARD_BEFORE_FINISH != 0 && QSB_DISCARD_BEFORE_FINISH != 1
+#error "QSB_DISCARD_BEFORE_FINISH must be 0 or 1"
+#endif
+#if QSB_DISCARD_BEFORE_FINISH && (!(QSB_L2STATE & 1024) || !QSB_PREP_STATE)
+#error "QSB_DISCARD_BEFORE_FINISH requires consumed-state discard and block-major planes"
 #endif
 /* QSB_PROBE_NOSTATE (speed probe only, wrong math): prepare/finish address the state of block
  * blockIdx.x & 63 only, so the state traffic never leaves L2. */
@@ -2374,6 +2428,11 @@ __device__ int gpu_is_der_easy(const uint8_t *d, int l) { return l>=9&&(d[0]>>4)
 #endif
 /* Native carrier fingerprint; checked against the fixed compute_52 build. */
 __device__ __constant__ int qsb_carrier_zeros = QSB_ZEROS_N;
+__device__ __constant__ int qsb_carrier_discard_before_finish = QSB_DISCARD_BEFORE_FINISH;
+__device__ __constant__ int qsb_carrier_discard_load_token = QSB_DISCARD_LOAD_TOKEN;
+__device__ __constant__ int qsb_carrier_finish_state_cg = QSB_FINISH_STATE_CG;
+__device__ __constant__ int qsb_carrier_discard_leader_step = QSB_DISCARD_LEADER_STEP;
+__device__ __constant__ int qsb_carrier_discard_plane_mask = QSB_DISCARD_PLANE_MASK;
 __device__ int gpu_leading_zero_bits(const uint8_t *h) {
     int z = 0;
     for (int i = 0; i < 32; i++) {
@@ -4460,6 +4519,9 @@ __global__ void __launch_bounds__(STAGE == 0 ? QSB_S0_THREADS : QSB_S2_THREADS,
 #endif
     } else {
 
+#if QSB_DISCARD_BEFORE_FINISH && QSB_SM80_PTX
+    const unsigned qsb_finish_live_mask=__ballot_sync(0xffffffffu,active);
+#endif
     if(!active)return;
 #if QSB_PK_ON
     uint8_t *const pk_rec=(FAST_TAIL && d_gt &&
@@ -4487,6 +4549,34 @@ __global__ void __launch_bounds__(STAGE == 0 ? QSB_S0_THREADS : QSB_S2_THREADS,
     ulonglong2 y01=saved[0*s+i],y23=saved[1*s+i];
     ulonglong2 v01=saved[2*s+i],v23=saved[3*s+i];
 #endif
+#endif
+#if QSB_DISCARD_BEFORE_FINISH && QSB_SM80_PTX
+    /* Token1 consumes one representative word per complete vector load;
+     * actual SASS admission must show four complete128-bit loads, each feeding
+     * this synchronized vote before cache-line retirement. Split or delayed
+     * vector-load ordering is rejected. Token0 retains the all-limb control.
+     * A zero token leaves the line to ordinary eviction; arithmetic is intact. */
+    const unsigned qsb_loaded_nonzero=__ballot_sync(qsb_finish_live_mask,
+#if QSB_DISCARD_LOAD_TOKEN
+        ((uint32_t)y01.x|(uint32_t)y23.x|(uint32_t)v01.x|(uint32_t)v23.x)!=0);
+#else
+        (y01.x|y01.y|y23.x|y23.y|v01.x|v01.y|v23.x|v23.y)!=0);
+#endif
+    if((threadIdx.x&(QSB_DISCARD_LEADER_STEP-1u))==0u && (qsb_loaded_nonzero&(1u<<(threadIdx.x&31u)))){
+        const ulonglong2 *dst=saved+(uint32_t)(QSB_STATE_BLK*(QSB_STATE_PLANES*QSB_TREE_N)+threadIdx.x);
+#if QSB_DISCARD_PLANE_MASK & 1
+        qsb_discard_l2(dst);
+#endif
+#if QSB_DISCARD_PLANE_MASK & 2
+        qsb_discard_l2(dst+QSB_TREE_N);
+#endif
+#if QSB_DISCARD_PLANE_MASK & 4
+        qsb_discard_l2(dst+2*QSB_TREE_N);
+#endif
+#if QSB_DISCARD_PLANE_MASK & 8
+        qsb_discard_l2(dst+3*QSB_TREE_N);
+#endif
+    }
 #endif
     qy[0]=y01.x;qy[1]=y01.y;qy[2]=y23.x;qy[3]=y23.y;
     qzzz[0]=v01.x;qzzz[1]=v01.y;qzzz[2]=v23.x;qzzz[3]=v23.y;
@@ -4531,7 +4621,7 @@ __global__ void __launch_bounds__(STAGE == 0 ? QSB_S0_THREADS : QSB_S2_THREADS,
     uint64_t q1x[4],q2x[4];
     uint32_t y_parities = qsb_packed_finish(
         qy,qzzz,prod,weighted_inv,u2rx,u2ry,recovery_c,q1x,q2x);
-#if (QSB_L2STATE & 1024) && QSB_SM80_PTX && QSB_PREP_STATE
+#if (QSB_L2STATE & 1024) && QSB_SM80_PTX && QSB_PREP_STATE && !QSB_DISCARD_BEFORE_FINISH
     /* QSB_L2STATE bit 1024: drop this block's state lines from L2 (no write-back) as soon as
      * the recovery has consumed them: every lane's four loads fed qsb_packed_finish, and the
      * warp's loads were one instruction per plane, so the whole 8-lane group has its data. */
@@ -5073,22 +5163,34 @@ static void qsb_subpipe_launch(
 ) {
     QsbSubPipe &P = g_qsb_sub;
     if (!P.ready && !qsb_subpipe_init(st)) { fprintf(stderr, "sub-batch pipeline not initialized\n"); exit(2); }
-    /* finish(g) of this host batch must follow the slot stream's hit-counter reset */
-    cudaError_t e = cudaEventRecord(P.ev_in, st);
-    if (e == cudaSuccess) e = cudaStreamWaitEvent(P.s2b[0], P.ev_in, 0);
-    if (e == cudaSuccess && P.s2b[1] != P.s2b[0]) e = cudaStreamWaitEvent(P.s2b[1], P.ev_in, 0);
-#if QSB_ASICBOOST
-    /* prepare reads the host batch's four tail precomputes that the slot stream uploads */
-    if (e == cudaSuccess) e = cudaStreamWaitEvent(P.s0[0], P.ev_in, 0);
-    if (e == cudaSuccess && P.s0[1] != P.s0[0]) e = cudaStreamWaitEvent(P.s0[1], P.ev_in, 0);
-#endif
-    if (e != cudaSuccess) qsb_subpipe_die("input ordering", e);
+    /* A cold graph still captures through the role streams. Once every ring is
+     * instantiated, replay runs only on the ring streams and needs no role wait. */
+    bool role_input = !qsb_sg::enabled;
     if (qsb_sg::enabled)
         for (int r = 0; r < QSB_SUBRING; r++)
-            qsb_sg::check(cudaStreamWaitEvent(qsb_sg::rings[r].stream, P.ev_in, 0), "input ordering");
+            if (!qsb_sg::rings[r].exec) role_input = true;
+    bool graph_used[QSB_SUBRING] = {};
+    /* finish(g) of this host batch must follow the slot stream's hit-counter reset */
+    cudaError_t e = cudaEventRecord(P.ev_in, st);
+    if (e == cudaSuccess && role_input) e = cudaStreamWaitEvent(P.s2b[0], P.ev_in, 0);
+    if (e == cudaSuccess && role_input && P.s2b[1] != P.s2b[0])
+        e = cudaStreamWaitEvent(P.s2b[1], P.ev_in, 0);
+#if QSB_ASICBOOST
+    /* prepare reads the host batch's four tail precomputes that the slot stream uploads */
+    if (e == cudaSuccess && role_input) e = cudaStreamWaitEvent(P.s0[0], P.ev_in, 0);
+    if (e == cudaSuccess && role_input && P.s0[1] != P.s0[0])
+        e = cudaStreamWaitEvent(P.s0[1], P.ev_in, 0);
+#endif
+    if (e != cudaSuccess) qsb_subpipe_die("input ordering", e);
     for (int off = 0; off < batch_size; off += QSB_SUBPIPE) {
         const int n = batch_size - off < QSB_SUBPIPE ? batch_size - off : QSB_SUBPIPE;
         const int r = (int)(P.g % (unsigned long long)QSB_SUBRING);
+        if (qsb_sg::enabled && !graph_used[r]) {
+            /* This batch's first launch on r follows its own input upload/reset.
+             * Prior launches on r remain ahead of this wait: state reuse is ordered. */
+            qsb_sg::check(cudaStreamWaitEvent(qsb_sg::rings[r].stream, P.ev_in, 0), "input ordering");
+            graph_used[r] = true;
+        }
         cudaStream_t s0 = P.s0[P.g & 1ull];
         cudaStream_t root_st = P.rtb[P.root_serial ? 0 : (P.g & 1ull)];
 #if QSB_ASICBOOST
@@ -5212,6 +5314,7 @@ static void qsb_subpipe_launch(
         /* Each ring stream orders its own graph launches across host batches; the slot's
          * readback waits for every ring's last finish before its hit buffers are reused. */
         for (int r = 0; r < QSB_SUBRING; r++) {
+            if (!graph_used[r]) continue;
             qsb_sg::check(cudaEventRecord(qsb_sg::rings[r].done, qsb_sg::rings[r].stream), "completion");
             qsb_sg::check(cudaStreamWaitEvent(st, qsb_sg::rings[r].done, 0), "output ordering");
         }

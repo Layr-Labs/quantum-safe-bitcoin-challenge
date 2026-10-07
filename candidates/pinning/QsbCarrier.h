@@ -52,8 +52,6 @@ enum QsbCarrierKernel {
     QK_RF,       /* qsb_root_fused<K>             (optional: empty name when absent) */
     QK_RR,       /* qsb_root_register             (optional) */
     QK_PFC,      /* qsb_prefix_field_check_kernel (optional) */
-    QK_LC,
-    QK_CE,
     QK_N
 };
 
