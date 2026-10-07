@@ -1,5 +1,5 @@
-// SPDX-License-Identifier: GPL-3.0-only
-// Original 27-product window: CUDA/RTX 4090 validated; see SUBMISSION.md.
+/* SPDX-License-Identifier: GPL-3.0-only */
+/* Original 27-product window: CUDA/RTX 4090 validated; see SUBMISSION.md. */
 /* Narrow 18-product window: CPU PTX-semantic audit; see NARROW-PARITY.md. */
 /* Include after qsb_packed_raw_mul and qsb_sum_parity in PackedRecovery.cuh. */
 #pragma once
@@ -187,7 +187,7 @@ __device__ __forceinline__ uint32_t qsb_parity_product_window(
     /* values of mid and q. All remaining cases keep the full-product path. */
     if(x7<0xfffffff9u && (uint32_t)q<0xfffff47fu) {
 #else
-    // Unknown carries change q by at most 1958. Exclude the final all-one
+    /* Unknown carries change q by at most 1958. Exclude the final all-one */
     /* limb too, so the baseline sum-parity exceptional correction cannot fire. */
     if(x7!=0xffffffffu && (uint32_t)q<0xfffff859u) {
 #endif

@@ -6,16 +6,38 @@
 #ifndef QSB_FIN_LEA
 #define QSB_FIN_LEA 1 /* ercumentyildirim b62c41b8 via cefika 6fd66979: the same LEA.HI rotate-add in the finish pubkey hash Sigma adds (exact); 0 = off */
 #endif
+#ifndef QSB_FIN_RING_STREAMS
+#define QSB_FIN_RING_STREAMS 0   /* arena r4 (3/3 proposers): one finish stream per state ring instead of two parity streams */
+#endif
+#ifndef QSB_HOST_TICK_ACTUAL
+#define QSB_HOST_TICK_ACTUAL 1
+#endif
+#if QSB_HOST_TICK_ACTUAL != 0 && QSB_HOST_TICK_ACTUAL != 1
+#error "QSB_HOST_TICK_ACTUAL must be 0 or 1"
+#endif
+#ifndef QSB_POLLGUARD_OFF
+#define QSB_POLLGUARD_OFF 0   /* public ercumentyildirim 62772a7a / jacklightChen 2c80aa74: poll other GPUs' hit files on one GPU too (J skips it) */
+#endif
+#ifndef QSB_HIT_FILE_PERSIST
+#define QSB_HIT_FILE_PERSIST 0   /* public jacklightChen 2c80aa74: GPU hit file opened once and flushed, not reopened per batch */
+#endif
+#ifndef QSB_MAX_CONN
+#define QSB_MAX_CONN 0   /* 1: CUDA_DEVICE_MAX_CONNECTIONS=32 unless set (host only) */
+#endif
 /* l2state variant fkF20c8 + split retry */
 #ifndef QSB_SUB_FINE
-#define QSB_SUB_FINE 1
+#define QSB_SUB_FINE 0 /* native 131072-candidate sub-batches with the matching fused K8 carrier */
 #endif
+#ifndef QSB_SUBPIPE /* knob sweep: -DQSB_SUBPIPE=N overrides the SUB_FINE choice */
 #if QSB_SUB_FINE
 #define QSB_SUBPIPE 65536
 #else
 #define QSB_SUBPIPE 131072
 #endif
+#endif
+#ifndef QSB_SUBRING /* knob sweep: -DQSB_SUBRING=N overrides */
 #define QSB_SUBRING 4 /* SUBRING 4 + SLOTS 5: host pipeline depth measured on intel-r5 (ercumentyildirim 127d95d4) */
+#endif
 #define QSB_ROOT_FUSED 1
 #ifndef QSB_PERSIST_WINDOW_CAP
 #define QSB_PERSIST_WINDOW_CAP (36u<<20) /* 36 MiB as in ercumentyildirim b62c41b8; HY6 arm (after ercumentyildirim #1892, cefika 482a55e6): 42 MiB table window under an unchanged persisting set-aside; 0 = the base */
@@ -24,7 +46,9 @@
 #ifndef QSB_GREEN
 #define QSB_GREEN 20 /* finish green partition 22 -> 20 SMs (8 shared): the cheaper MLATE/CHORD/SUMU finish fits the crown's partition again; host only */
 #endif
+#ifndef QSB_GREEN_SHARED /* knob sweep: -DQSB_GREEN_SHARED=N overrides */
 #define QSB_GREEN_SHARED 10
+#endif
 #ifndef QSB_CODEX_DRAW_20260924_C
 #define QSB_CODEX_DRAW_20260924_C 1 /* no runtime effect; identifies the ranked GLV-lean control draw */
 #endif
@@ -353,6 +377,13 @@ static_assert(alignof(ulonglong2) == 16, "pipeline vector must be 16-byte aligne
 #endif
 #ifndef QSB_TREE_OFFLOAD2
 #define QSB_TREE_OFFLOAD2 0   /* 1: expand the leaf inverses in a dense kernel, not in finish */
+#endif
+/* QSB_FIN_ROOT_EARLY (arena r6, p1/p3 converged): the finish kernel's zero-state return moves below the two
+ * root-record loads, so a lane's root requests issue while its state loads are still in flight instead of after
+ * the state words arrive and are tested. Zero-state lanes read their block's (valid, uniform) root records and
+ * then return as before; nothing between the two places stores. 0 = today's order. */
+#ifndef QSB_FIN_ROOT_EARLY
+#define QSB_FIN_ROOT_EARLY 0
 #endif
 #ifndef QSB_S2_THREADS
 #define QSB_S2_THREADS 256    /* finish-kernel block size (only free when the down-tree is offloaded) */
@@ -1678,6 +1709,29 @@ __device__ __forceinline__ void qsb_tbl_policies(uint64_t &cold,uint64_t &hot) {
 #if QSB_GATHER_V4
 #error "QSB_GATHER_V4: ld.global.v4.u64 is 256 bits; ptxas rejects vectors above 128 bits"
 #endif
+#ifndef QSB_GATHER_L1HINT
+#define QSB_GATHER_L1HINT 0
+#endif
+#if QSB_GATHER_L1HINT != 0 && QSB_GATHER_L1HINT != 1
+#error "QSB_GATHER_L1HINT must be 0 or 1"
+#endif
+/* Keep hot-bank records in L1 ahead of streaming cold-bank records. The piped
+ * predicated gathers keep their existing L2 policies, addresses and load widths.
+ * Other gather paths are unchanged. */
+/* QSB_CHAIN_YXOR_LATE (arena r5 p1): the piped chain gathers the next record's Y half raw
+ * and applies the sign mask at the end of the addition, tied to the last ZZZ1 product
+ * through the opaque zero z, so the gather's first consumer sits behind the trip's field
+ * work instead of next to the load. The mask is sign(code) ^ (ZZZ1[0] & z) = sign(code)
+ * (z = pin_yoff_zero = 0): the same Y bits. 0 = today's code. */
+#ifndef QSB_CHAIN_YXOR_LATE
+#define QSB_CHAIN_YXOR_LATE 0
+#endif
+#if QSB_CHAIN_YXOR_LATE != 0 && QSB_CHAIN_YXOR_LATE != 1
+#error "QSB_CHAIN_YXOR_LATE must be 0 or 1"
+#endif
+#if QSB_CHAIN_YXOR_LATE
+template<bool RAW=false>
+#endif
 __device__ __forceinline__ void qsb_load_glv_y_code(const uint8_t *table,uint32_t code,
                                                      uint64_t *y) {
     const uint64_t m32=(uint32_t)((int32_t)code>>31);
@@ -1692,10 +1746,17 @@ __device__ __forceinline__ void qsb_load_glv_y_code(const uint8_t *table,uint32_
     uint64_t pc,ph;
     qsb_tbl_policies(pc,ph);
     asm("{ .reg .u64 g; .reg .pred c; cvta.to.global.u64 g, %4; setp.ge.u32 c, %7, %8;\n\t"
+#if QSB_GATHER_L1HINT
+        "@c  ld.global.nc.L1::evict_first.L2::cache_hint.L2::64B.v2.u64 {%0,%1}, [g], %5;\n\t"
+        "@!c ld.global.nc.L1::evict_last.L2::cache_hint.L2::64B.v2.u64 {%0,%1}, [g], %6;\n\t"
+        "@c  ld.global.nc.L1::evict_first.L2::cache_hint.v2.u64 {%2,%3}, [g+16], %5;\n\t"
+        "@!c ld.global.nc.L1::evict_last.L2::cache_hint.v2.u64 {%2,%3}, [g+16], %6; }"
+#else
         "@c  ld.global.nc.L2::cache_hint.L2::64B.v2.u64 {%0,%1}, [g], %5;\n\t"
         "@!c ld.global.nc.L2::cache_hint.L2::64B.v2.u64 {%0,%1}, [g], %6;\n\t"
         "@c  ld.global.nc.L2::cache_hint.v2.u64 {%2,%3}, [g+16], %5;\n\t"
         "@!c ld.global.nc.L2::cache_hint.v2.u64 {%2,%3}, [g+16], %6; }"
+#endif
         : "=l"(y0.x), "=l"(y0.y), "=l"(y1.x), "=l"(y1.y)
         : "l"(ty), "l"(pc), "l"(ph), "r"(code&0x7fffffffu), "r"(QSB_HOT_RECS));
 #elif QSB_TBL_L2POL_ON
@@ -1726,6 +1787,9 @@ __device__ __forceinline__ void qsb_load_glv_y_code(const uint8_t *table,uint32_
 #else
     ulonglong2 y0=__ldg(ty),y1=__ldg(ty+1);
 #endif
+#if QSB_CHAIN_YXOR_LATE
+    if(RAW) { y[0]=y0.x; y[1]=y0.y; y[2]=y1.x; y[3]=y1.y; return; }
+#endif
     y[0]=y0.x^m; y[1]=y0.y^m; y[2]=y1.x^m; y[3]=y1.y^m;
 }
 __device__ __forceinline__ void qsb_load_glv_x_code(const uint8_t *table,uint32_t code,
@@ -1736,10 +1800,17 @@ __device__ __forceinline__ void qsb_load_glv_x_code(const uint8_t *table,uint32_
     uint64_t pc,ph;
     qsb_tbl_policies(pc,ph);
     asm("{ .reg .u64 g; .reg .pred c; cvta.to.global.u64 g, %4; setp.ge.u32 c, %7, %8;\n\t"
+#if QSB_GATHER_L1HINT
+        "@c  ld.global.nc.L1::evict_first.L2::cache_hint.v2.u64 {%0,%1}, [g], %5;\n\t"
+        "@!c ld.global.nc.L1::evict_last.L2::cache_hint.v2.u64 {%0,%1}, [g], %6;\n\t"
+        "@c  ld.global.nc.L1::evict_first.L2::cache_hint.v2.u64 {%2,%3}, [g+16], %5;\n\t"
+        "@!c ld.global.nc.L1::evict_last.L2::cache_hint.v2.u64 {%2,%3}, [g+16], %6; }"
+#else
         "@c  ld.global.nc.L2::cache_hint.v2.u64 {%0,%1}, [g], %5;\n\t"
         "@!c ld.global.nc.L2::cache_hint.v2.u64 {%0,%1}, [g], %6;\n\t"
         "@c  ld.global.nc.L2::cache_hint.v2.u64 {%2,%3}, [g+16], %5;\n\t"
         "@!c ld.global.nc.L2::cache_hint.v2.u64 {%2,%3}, [g+16], %6; }"
+#endif
         : "=l"(x0.x), "=l"(x0.y), "=l"(x1.x), "=l"(x1.y)
         : "l"(tx), "l"(pc), "l"(ph), "r"(code&0x7fffffffu), "r"(QSB_HOT_RECS));
 #elif QSB_TBL_L2POL_ON
@@ -1879,6 +1950,18 @@ __device__ __constant__ uint32_t pin_yoff_zero = 0;
 #ifndef QSB_MAC_DROW
 #define QSB_MAC_DROW 0
 #endif
+#ifndef QSB_ASYNC_STAGE
+#define QSB_ASYNC_STAGE 0
+#endif
+#if QSB_ASYNC_STAGE != 0 && QSB_ASYNC_STAGE != 1
+#error "QSB_ASYNC_STAGE must be 0 or 1"
+#endif
+#if QSB_ASYNC_STAGE && (!QSB_CHAIN_PEEL || QSB_CHAIN_ROLES)
+#error "QSB_ASYNC_STAGE requires the peeled one-addition chain"
+#endif
+#if QSB_CHAIN_YXOR_LATE && QSB_ASYNC_STAGE
+#error "QSB_CHAIN_YXOR_LATE and QSB_ASYNC_STAGE both move the next record's Y gather"
+#endif
 /* qsb_pointadd_pair<true> with the swap written as two XORs (QSB_YRAW_CARRY): the next
  * record's Y half is gathered into a local Yn, and on return Yoff = Y2 ^ z (this trip's Y2)
  * and Y2 = Yn (the gathered ordinate), which is what the tail swap leaves in (y0, y1). Every
@@ -1889,15 +1972,46 @@ __device__ __forceinline__ void qsb_pointadd_pair_raw(
     const uint8_t *table,uint32_t next_code) {
     uint64_t U2[4],S2[4],P[4],PP[4],PPP[4],Q[4],Yn[4];
     _ModAddLazyOff(S2,Y2,Yoff);
+#if QSB_ASYNC_STAGE && defined(QSB_CARRIER_BUILD) && defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 800
+    /* Each lane stages its next record while this addition uses the current one.
+     * Four 16-byte copies replace the four global loads; no speculative record.
+     * The lane alone reads/writes its slots, so wait_group needs no CTA barrier. */
+    __shared__ ulonglong2 staged[4][QSB_S0_THREADS];
+    const uint8_t *next_record=(const uint8_t *)qsb_pipe_half(table,next_code,0u);
+#if QSB_TBL_L2POL_ON
+    const uint64_t policy=qsb_tbl_policy(next_code);
+#endif
+    #pragma unroll
+    for(int chunk=0;chunk<4;chunk++) {
+        const unsigned dst=(unsigned)__cvta_generic_to_shared(&staged[chunk][threadIdx.x]);
+#if QSB_TBL_L2POL_ON
+        asm volatile("{ .reg .u64 g; cvta.to.global.u64 g, %1;\n\t"
+                     "cp.async.cg.shared.global.L2::cache_hint [%0], [g], 16, %2; }"
+                     :: "r"(dst), "l"(next_record+16*chunk), "l"(policy) : "memory");
+#else
+        asm volatile("{ .reg .u64 g; cvta.to.global.u64 g, %1;\n\t"
+                     "cp.async.cg.shared.global [%0], [g], 16; }"
+                     :: "r"(dst), "l"(next_record+16*chunk) : "memory");
+#endif
+    }
+    asm volatile("cp.async.commit_group;" ::: "memory");
+#else
+#if QSB_CHAIN_YXOR_LATE
+    qsb_load_glv_y_code<true>(table,next_code,Yn);
+#else
     qsb_load_glv_y_code(table,next_code,Yn);
+#endif
     asm volatile("" ::: "memory");
+#endif
 #if QSB_MAC_DROW
     qsb_mul2add(Ry,S2,ZZZ1,Ry,Qy);
 #else
     qsb_mul2add(Ry,S2,ZZZ1,Qy,Ry);
 #endif
     _ModMult(U2,X2,ZZ1);
+#if !(QSB_ASYNC_STAGE && defined(QSB_CARRIER_BUILD) && defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 800)
     qsb_load_glv_x_code(table,next_code,X2);
+#endif
     QSB_SUB_CHAIN_P(P,U2,X1);
     _ModSqr(PP,P);
     _ModMult(PPP,PP,P);
@@ -1906,8 +2020,24 @@ __device__ __forceinline__ void qsb_pointadd_pair_raw(
     _ModSqrAddSub2(X1,Ry,PPP,Q);
     QSB_SUB_CHAIN_QY(Qy,X1,Q);
     _ModMult(ZZZ1,ZZZ1,PPP);
+#if QSB_ASYNC_STAGE && defined(QSB_CARRIER_BUILD) && defined(__CUDA_ARCH__) && __CUDA_ARCH__ >= 800
+    asm volatile("cp.async.wait_group 0;" ::: "memory");
+    const ulonglong2 sx0=staged[0][threadIdx.x],sx1=staged[1][threadIdx.x];
+    const ulonglong2 sy0=staged[2][threadIdx.x],sy1=staged[3][threadIdx.x];
+    const uint64_t m32=(uint32_t)((int32_t)next_code>>31);
+    const uint64_t m=(m32<<32)|m32;
+    X2[0]=sx0.x; X2[1]=sx0.y; X2[2]=sx1.x; X2[3]=sx1.y;
+    Yn[0]=sy0.x^m; Yn[1]=sy0.y^m; Yn[2]=sy1.x^m; Yn[3]=sy1.y^m;
+#endif
+#if QSB_CHAIN_YXOR_LATE
+    const uint32_t late32=(uint32_t)((int32_t)next_code>>31)^((uint32_t)ZZZ1[0]&(uint32_t)z);
+    const uint64_t late=((uint64_t)late32<<32)|late32;
+    #pragma unroll
+    for(int i=0;i<4;i++) { Yoff[i]=Y2[i]^z; Y2[i]=Yn[i]^late; }
+#else
     #pragma unroll
     for(int i=0;i<4;i++) { Yoff[i]=Y2[i]^z; Y2[i]=Yn[i]; }
+#endif
 }
 #endif
 
@@ -4490,12 +4620,14 @@ __global__ void __launch_bounds__(STAGE == 0 ? QSB_S0_THREADS : QSB_S2_THREADS,
 #endif
     qy[0]=y01.x;qy[1]=y01.y;qy[2]=y23.x;qy[3]=y23.y;
     qzzz[0]=v01.x;qzzz[1]=v01.y;qzzz[2]=v23.x;qzzz[3]=v23.y;
+#if !QSB_FIN_ROOT_EARLY
     if((qzzz[0]|qzzz[1]|qzzz[2]|qzzz[3])==0){
 #if QSB_PK_ON
         if(pk_rec)((uint32_t *)(pk_rec+64u*QSB_PK_LANES))[threadIdx.x]=0u;
 #endif
         return;
     }
+#endif
     uint64_t weighted_inv[4];
     size_t root_count=((size_t)batch_size+QSB_TREE_N-1)/QSB_TREE_N;
 #if QSB_ROOT_V2
@@ -4522,6 +4654,14 @@ __global__ void __launch_bounds__(STAGE == 0 ? QSB_S0_THREADS : QSB_S2_THREADS,
 #endif
     prod[4]=0;
     (void)tree;
+#if QSB_FIN_ROOT_EARLY
+    if((qzzz[0]|qzzz[1]|qzzz[2]|qzzz[3])==0){
+#if QSB_PK_ON
+        if(pk_rec)((uint32_t *)(pk_rec+64u*QSB_PK_LANES))[threadIdx.x]=0u;
+#endif
+        return;
+    }
+#endif
     uint64_t u2rx[4]={pin_u2rx_words[0],pin_u2rx_words[1],
                       pin_u2rx_words[2],pin_u2rx_words[3]};
     uint64_t u2ry[4]={pin_u2ry_words[0],pin_u2ry_words[1],
@@ -4856,6 +4996,8 @@ static void launch_pinning_pipeline(
 }
 
 #if QSB_SUBPIPE && QSB_SLOTPIPE
+static constexpr int qsb_finish_stream_count =
+    QSB_FIN_RING_STREAMS && QSB_SUBRING > 2 ? QSB_SUBRING : 2;
 #ifndef QSB_GREEN
 #define QSB_GREEN 0   /* >0: finish runs on its own green-context partition of this many SMs */
 #endif
@@ -4873,7 +5015,7 @@ static decltype(&cuGreenCtxStreamCreate) qsb_cuGreenCtxStreamCreate;
 #ifndef QSB_GREEN_SPLIT_FLAGS
 #define QSB_GREEN_SPLIT_FLAGS CU_DEV_SM_RESOURCE_SPLIT_IGNORE_SM_COSCHEDULING
 #endif
-static int qsb_green_streams(int dev, int nB, cudaStream_t sA[4], cudaStream_t sB[2], int least, int greatest,
+static int qsb_green_streams(int dev, int nB, cudaStream_t sA[4], cudaStream_t sB[qsb_finish_stream_count], int least, int greatest,
                              unsigned *gotA, unsigned *gotB) {
     struct { const char *n; void **p; } want[] = {
         {"cuDeviceGetDevResource", (void **)&qsb_cuDeviceGetDevResource},
@@ -4920,7 +5062,7 @@ static int qsb_green_streams(int dev, int nB, cudaStream_t sA[4], cudaStream_t s
 #ifndef QSB_GREEN_S2_LEAST
 #define QSB_GREEN_S2_LEAST 0   /* 1: finish streams at the least priority (the root kernel then outranks them) */
 #endif
-    for (int i = 0; i < 2; i++) {
+    for (int i = 0; i < qsb_finish_stream_count; i++) {
         if (qsb_cuGreenCtxStreamCreate(&t, gB, CU_STREAM_NON_BLOCKING, QSB_GREEN_S2_LEAST ? least : greatest) != CUDA_SUCCESS) return 0;
         sB[i] = (cudaStream_t)t;
     }
@@ -4940,7 +5082,7 @@ static int qsb_green_streams(int dev, int nB, cudaStream_t sA[4], cudaStream_t s
 
 struct QsbSubPipe {
     int ready;
-    cudaStream_t s0[2], rt, rtb[2], s2, s2b[2];
+    cudaStream_t s0[2], rt, rtb[2], s2, s2b[qsb_finish_stream_count];
     int root_serial; // correctness/diagnostic rollback only; no timing-based selection
     cudaEvent_t ev_s0[QSB_SUBRING], ev_rt[QSB_SUBRING], ev_s2[QSB_SUBRING], ev_in, ev_out, ev_out2;
     int used[QSB_SUBRING];
@@ -4977,7 +5119,7 @@ static int qsb_subpipe_init(cudaStream_t like) {
 #if QSB_GREEN
     {
         int dev = 0; cudaGetDevice(&dev);
-        cudaStream_t sA[4], sB[2]; unsigned nA = 0, nB = 0;
+        cudaStream_t sA[4], sB[qsb_finish_stream_count]; unsigned nA = 0, nB = 0;
         if (!qsb_green_streams(dev, QSB_GREEN, sA, sB, least, greatest, &nA, &nB)) {
             printf("  Green partitions unavailable: monolithic batch pipeline\n"); fflush(stdout);
             return 0;
@@ -4985,6 +5127,10 @@ static int qsb_subpipe_init(cudaStream_t like) {
         P.s0[0] = sA[0]; P.s0[1] = sA[1]; P.rt = sA[2];
         P.rtb[0] = sA[2]; P.rtb[1] = sA[3];
         P.s2b[0] = sB[0]; P.s2b[1] = sB[1]; P.s2 = sB[0];
+#if QSB_FIN_RING_STREAMS
+        for (int i = 2; i < qsb_finish_stream_count; i++)
+            P.s2b[i] = sB[i];
+#endif
         printf("  Green partitions: prepare/roots on %u SMs, finish on %u SMs\n", nA, nB);
     }
 #else
@@ -4996,6 +5142,10 @@ static int qsb_subpipe_init(cudaStream_t like) {
     if (e == cudaSuccess) e = cudaStreamCreateWithPriority(&P.s2, cudaStreamNonBlocking,
                                                            QSB_SUB_S2PRIO ? greatest : least);
     P.s2b[0] = P.s2b[1] = P.s2;
+#if QSB_FIN_RING_STREAMS
+    for (int i = 2; i < qsb_finish_stream_count; i++)
+        P.s2b[i] = P.s2;
+#endif
     if (e != cudaSuccess) qsb_subpipe_die("stream setup", e);
 #endif
     const char *root_serial = getenv("QSB_ROOT_SERIAL");
@@ -5006,6 +5156,10 @@ static int qsb_subpipe_init(cudaStream_t like) {
     if (cudaStreamGetAttribute(like, cudaStreamAttributeAccessPolicyWindow, &av) == cudaSuccess) {
         cudaStream_t all[6] = {P.s0[0], P.s0[1], P.rtb[0], P.rtb[1], P.s2b[0], P.s2b[1]};
         for (int i = 0; i < 6; i++) cudaStreamSetAttribute(all[i], cudaStreamAttributeAccessPolicyWindow, &av);
+#if QSB_FIN_RING_STREAMS
+        for (int i = 2; i < qsb_finish_stream_count; i++)
+            cudaStreamSetAttribute(P.s2b[i], cudaStreamAttributeAccessPolicyWindow, &av);
+#endif
     }
     (void)cudaGetLastError();
     const int blocks = (QSB_SUBPIPE + QSB_TREE_N - 1) / QSB_TREE_N;
@@ -5077,6 +5231,11 @@ static void qsb_subpipe_launch(
     cudaError_t e = cudaEventRecord(P.ev_in, st);
     if (e == cudaSuccess) e = cudaStreamWaitEvent(P.s2b[0], P.ev_in, 0);
     if (e == cudaSuccess && P.s2b[1] != P.s2b[0]) e = cudaStreamWaitEvent(P.s2b[1], P.ev_in, 0);
+#if QSB_FIN_RING_STREAMS
+    for (int i = 2; i < qsb_finish_stream_count && e == cudaSuccess; i++)
+        if (P.s2b[i] != P.s2b[0])
+            e = cudaStreamWaitEvent(P.s2b[i], P.ev_in, 0);
+#endif
 #if QSB_ASICBOOST
     /* prepare reads the host batch's four tail precomputes that the slot stream uploads */
     if (e == cudaSuccess) e = cudaStreamWaitEvent(P.s0[0], P.ev_in, 0);
@@ -5178,7 +5337,12 @@ static void qsb_subpipe_launch(
             qsb_root_group_finish<<<groups,256,0,root_st>>>(P.roots[r],blocks,P.super_roots[r],P.ckpt[r]);
 #endif
         e = cudaGetLastError();
+#if QSB_FIN_RING_STREAMS
+        /* Graph capture/replay retains its existing two-lane stream assignment. */
+        P.s2 = P.s2b[qsb_sg::enabled ? (int)(P.g & 1ull) : r];
+#else
         P.s2 = P.s2b[P.g & 1ull];
+#endif
         if (e == cudaSuccess) e = cudaEventRecord(P.ev_rt[r], root_st);
         if (e == cudaSuccess) e = cudaStreamWaitEvent(P.s2, P.ev_rt[r], 0);
         if (e != cudaSuccess) qsb_subpipe_die("roots", e);
@@ -5222,6 +5386,17 @@ static void qsb_subpipe_launch(
     if (e == cudaSuccess) e = cudaStreamWaitEvent(st, P.ev_out, 0);
     if (e == cudaSuccess && P.s2b[1] != P.s2b[0]) e = cudaEventRecord(P.ev_out2, P.s2b[1]);
     if (e == cudaSuccess && P.s2b[1] != P.s2b[0]) e = cudaStreamWaitEvent(st, P.ev_out2, 0);
+#if QSB_FIN_RING_STREAMS
+    /* Each wait captures the event's latest record at submission time, so this
+     * event can be reused immediately for the next stream's completion. */
+    for (int i = 2; i < qsb_finish_stream_count && e == cudaSuccess; i++) {
+        if (P.s2b[i] != P.s2b[0]) {
+            e = cudaEventRecord(P.ev_out2, P.s2b[i]);
+            if (e == cudaSuccess)
+                e = cudaStreamWaitEvent(st, P.ev_out2, 0);
+        }
+    }
+#endif
     if (e != cudaSuccess) qsb_subpipe_die("output ordering", e);
 }
 #endif
@@ -6477,6 +6652,9 @@ static uint64_t completed_candidates() {
 #endif
 
 int main(int argc, char **argv) {
+#if QSB_MAX_CONN
+    setenv("CUDA_DEVICE_MAX_CONNECTIONS", "32", 0);   /* before any CUDA call: more hardware queues than the default 8 */
+#endif
     uint32_t tail_w2 = 0;   /* W2 of the static tail block (QSB_TAIL_PRE) */
     uint32_t tail_w0 = 0;   /* W0 of the static tail block with a zero low byte (QSB_TAIL_TAB) */
     if (argc < 2) {
@@ -7291,11 +7469,16 @@ int main(int argc, char **argv) {
     uint32_t slot_seq[QSB_SLOTS]={0}, slot_lt[QSB_SLOTS]={0};
 #if QSB_PK_ON
     uint64_t slot_bno[QSB_SLOTS]={0}; uint32_t slot_bsz[QSB_SLOTS]={0};
+#elif QSB_HOST_TICK_ACTUAL
+    uint32_t slot_bsz[QSB_SLOTS]={0};
 #endif
     int slot_busy[QSB_SLOTS];
     uint32_t cur_mid[8];
     for (int s = 0; s < QSB_SLOTS; s++) slot_busy[s] = 0;
     uint64_t batch_no = 0;
+#if QSB_HIT_FILE_PERSIST
+    FILE *gpu_hit_file = nullptr;
+#endif
 #if QSB_REFILL_BEFORE_GATE
     auto publish_hits = [&](uint32_t hit_seq, uint32_t hit_lt,
                             uint32_t h_hit, const uint32_t *hits) -> int {
@@ -7309,6 +7492,8 @@ int main(int argc, char **argv) {
         if (err != cudaSuccess) { printf("CUDA error: %s\n", cudaGetErrorString(err)); return 1; }
 #if QSB_CPU_GRIND && QSB_HOST_GATE
 #if QSB_PK_ON
+        qcg::tick(qcg::mono_s(),(double)slot_bsz[s]);
+#elif QSB_HOST_TICK_ACTUAL
         qcg::tick(qcg::mono_s(),(double)slot_bsz[s]);
 #else
         qcg::tick(qcg::mono_s(),(double)BATCH);
@@ -7324,10 +7509,20 @@ int main(int argc, char **argv) {
 #endif
         if (h_hit > 0) {
             int nh = (h_hit > 64) ? 64 : (int)h_hit;
+#if QSB_HIT_FILE_PERSIST
+            if (!gpu_hit_file) {
+                mkdir("results", 0755);
+                char fname[256];
+                snprintf(fname, sizeof(fname), "results/pinning_hit_%d.txt", gpu_index);
+                gpu_hit_file = fopen(fname, "a");
+            }
+            FILE *f = gpu_hit_file;
+#else
             mkdir("results", 0755);
             char fname[256];
             snprintf(fname, sizeof(fname), "results/pinning_hit_%d.txt", gpu_index);
             FILE *f = fopen(fname, "a");
+#endif
             int wrote = 0;
             if (f) {
                 for (int h = 0; h < nh; h++) {
@@ -7368,7 +7563,11 @@ int main(int argc, char **argv) {
                     fprintf(f, "sequence=%u locktime=%u recid=%d\n", hs, lt, ri);
                     wrote = 1;
                 }
+#if QSB_HIT_FILE_PERSIST
+                if (wrote) fflush(f);
+#else
                 fclose(f);
+#endif
             }
             if (wrote) found = 1;
         }
@@ -7405,6 +7604,8 @@ int main(int argc, char **argv) {
         if(complete<last_completed_credit){fprintf(stderr,"Host SHA completion meter regressed\n");abort();}
         qcg::tick(qcg::mono_s(),(double)(complete-last_completed_credit));
         last_completed_credit=complete;
+#elif QSB_HOST_TICK_ACTUAL
+        qcg::tick(qcg::mono_s(),(double)slot_bsz[s]);
 #else
         qcg::tick(qcg::mono_s(),(double)BATCH);
 #endif
@@ -7445,6 +7646,9 @@ int main(int argc, char **argv) {
 #define QSB_SEQ_GROUP QSB_AB_K
 #else
 #define QSB_SEQ_GROUP 1
+#endif
+#ifndef QSB_PROGRESS_EVERY
+#define QSB_PROGRESS_EVERY 10   /* progress line cadence in sequences; qcheck's short rate check builds both arms with one group (4) */
 #endif
     /* QSB_ASICBOOST: each host batch covers the group's QSB_SEQ_GROUP sequences seq + k*stride at
      * the same locktimes, so the group still enumerates this GPU's sequences in order. */
@@ -7515,6 +7719,9 @@ int main(int argc, char **argv) {
 #endif
             cudaStream_t st = slot_stream[s];
             slot_seq[s] = seq; slot_lt[s] = batch_lt;
+#if !QSB_PK_ON && QSB_HOST_TICK_ACTUAL
+            slot_bsz[s] = (uint32_t)batch_sz;
+#endif
 #if QSB_PK_ON
             /* this batch's plane last held batch batch_no-1-2*QSB_SLOTS: finish and keep its hits */
             slot_bno[s] = batch_no - 1; slot_bsz[s] = (uint32_t)batch_sz;
@@ -7668,7 +7875,7 @@ int main(int argc, char **argv) {
 #endif
 
             /* Check if another GPU found it */
-            if ((total_searched % (50*1024*1024)) < (uint64_t)BATCH) {
+            if ((QSB_POLLGUARD_OFF || num_gpus > 1) && (total_searched % (50*1024*1024)) < (uint64_t)BATCH) {
                 char check[256];
                 for (int g = 0; g < num_gpus; g++) {
                     if (g == gpu_index) continue;
@@ -7695,7 +7902,7 @@ int main(int argc, char **argv) {
 
         /* Progress every 10 sequences (every group that crosses a multiple of 10) */
         uint32_t seqs_done = (seq - SEQ_MIN - effective_id) / effective_total + QSB_SEQ_GROUP;
-        if (seqs_done % 10 < QSB_SEQ_GROUP) {
+        if (seqs_done % QSB_PROGRESS_EVERY < QSB_SEQ_GROUP) {
             clock_gettime(CLOCK_MONOTONIC, &t1);
             double elapsed = (t1.tv_sec-t0.tv_sec)+(t1.tv_nsec-t0.tv_nsec)/1e9;
             double rate = total_searched / elapsed;
@@ -7703,6 +7910,9 @@ int main(int argc, char **argv) {
                    gpu_index, seqs_done, seq, total_searched/1000000, rate/1e6, elapsed);
         }
     }
+#if QSB_HIT_FILE_PERSIST
+    if (gpu_hit_file) fclose(gpu_hit_file);
+#endif
 #else
 #if QSB_ASICBOOST
 #error "QSB_ASICBOOST groups sequences in the slotted batch loop (QSB_SLOTPIPE)"
@@ -7811,7 +8021,7 @@ int main(int argc, char **argv) {
             }
 
             /* Check if another GPU found it */
-            if ((total_searched % (50*1024*1024)) < (uint64_t)BATCH) {
+            if ((QSB_POLLGUARD_OFF || num_gpus > 1) && (total_searched % (50*1024*1024)) < (uint64_t)BATCH) {
                 char check[256];
                 for (int g = 0; g < num_gpus; g++) {
                     if (g == gpu_index) continue;

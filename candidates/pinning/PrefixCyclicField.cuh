@@ -52,7 +52,7 @@ __device__ __forceinline__ uint32_t multiply8(uint32_t a,uint32_t b,unsigned lan
     const uint32_t lp2=__shfl_up_sync(full,lower_count,2,8);
     const uint32_t hp2=__shfl_up_sync(full,upper_count,2,8);
     const uint32_t lwrap=__shfl_sync(full,lower_count,(6u+d)&7u,8);
-    // A normalized 96-bit column contributes to three adjacent radix words.
+    /* A normalized 96-bit column contributes to three adjacent radix words. */
     const uint64_t low=(uint64_t)lo0+(d?lp1:0u)+(d>=2?lp2:0u);
     const uint64_t high=(uint64_t)hi0+(d?hp1:llast)+(d>=2?hp2:lwrap);
     const uint64_t hp=__shfl_up_sync(full,high,1,8);

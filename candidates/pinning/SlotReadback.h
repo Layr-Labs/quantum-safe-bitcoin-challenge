@@ -5,7 +5,7 @@
 
 namespace qsb {
 
-// One counter plus the unchanged 1024 device hit slots. Only the counter and
+/* One counter plus the unchanged 1024 device hit slots. Only the counter and */
 // first 64 hits cross to the host, in one transfer on the completion stream.
 class SlotReadback {
  public:
@@ -31,8 +31,8 @@ class SlotReadback {
   uint32_t* device_count() const { return device_; }
   uint32_t* device_indices() const { return device_ ? device_ + 1 : nullptr; }
 
-  // The caller must successfully synchronize the recorded completion event
-  // before reading these values or reusing this slot's buffers.
+  /* The caller must successfully synchronize the recorded completion event */
+  /* before reading these values or reusing this slot's buffers. */
   uint32_t count() const { return host_[0]; }
   const uint32_t* indices() const { return host_ ? host_ + 1 : nullptr; }
 
