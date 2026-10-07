@@ -54,6 +54,39 @@ static inline void sha_compress_ref(uint32_t st[8], const uint32_t w_in[16]) {
     st[0] += a; st[1] += b; st[2] += c; st[3] += d; st[4] += e; st[5] += f; st[6] += g; st[7] += h;
 }
 
+/* Rounds preceding the first sequence-containing word are problem constants.
+ * Compute them once; the resume path preserves all 64 logical SHA rounds and
+ * the original feed-forward state. First varying word is always in 0..15. */
+struct scalar_prefix_plan { uint32_t st0[8], work[8]; int rounds; };
+static inline scalar_prefix_plan sha_make_prefix_plan(const uint32_t st0[8], const uint32_t w0[16], int count) {
+    scalar_prefix_plan p; p.rounds=count;
+    for(int i=0;i<8;i++) p.st0[i]=p.work[i]=st0[i];
+    uint32_t a = p.work[0], b = p.work[1], c = p.work[2], d = p.work[3], e = p.work[4], f = p.work[5], g = p.work[6], h = p.work[7];
+    for (int i = 0; i < count; i++) {
+        uint32_t t1 = h + (ror32(e, 6) ^ ror32(e, 11) ^ ror32(e, 25)) + ((e & f) ^ (~e & g)) + K256[i] + w0[i];
+        uint32_t t2 = (ror32(a, 2) ^ ror32(a, 13) ^ ror32(a, 22)) + ((a & b) ^ (a & c) ^ (b & c));
+        h = g; g = f; f = e; e = d + t1; d = c; c = b; b = a; a = t1 + t2;
+    }
+    p.work[0]=a; p.work[1]=b; p.work[2]=c; p.work[3]=d; p.work[4]=e; p.work[5]=f; p.work[6]=g; p.work[7]=h;
+    return p;
+}
+static inline void sha_compress_prefix_plan(uint32_t out[8], const uint32_t w_in[16], const scalar_prefix_plan &p) {
+    uint32_t w[64];
+    for (int i = 0; i < 16; i++) w[i] = w_in[i];
+    for (int i = 16; i < 64; i++) {
+        uint32_t s0 = ror32(w[i - 15], 7) ^ ror32(w[i - 15], 18) ^ (w[i - 15] >> 3);
+        uint32_t s1 = ror32(w[i - 2], 17) ^ ror32(w[i - 2], 19) ^ (w[i - 2] >> 10);
+        w[i] = w[i - 16] + s0 + w[i - 7] + s1;
+    }
+    uint32_t a = p.work[0], b = p.work[1], c = p.work[2], d = p.work[3], e = p.work[4], f = p.work[5], g = p.work[6], h = p.work[7];
+    for (int i = p.rounds; i < 64; i++) {
+        uint32_t t1 = h + (ror32(e, 6) ^ ror32(e, 11) ^ ror32(e, 25)) + ((e & f) ^ (~e & g)) + K256[i] + w[i];
+        uint32_t t2 = (ror32(a, 2) ^ ror32(a, 13) ^ ror32(a, 22)) + ((a & b) ^ (a & c) ^ (b & c));
+        h = g; g = f; f = e; e = d + t1; d = c; c = b; b = a; a = t1 + t2;
+    }
+    out[0] = p.st0[0] + a; out[1] = p.st0[1] + b; out[2] = p.st0[2] + c; out[3] = p.st0[3] + d; out[4] = p.st0[4] + e; out[5] = p.st0[5] + f; out[6] = p.st0[6] + g; out[7] = p.st0[7] + h;
+}
+
 /* ---------------- 8-lane AVX2 ---------------- */
 #define QSB_SHA_AVX2 __attribute__((target("avx2"), always_inline)) inline
 #define QSB_SHA_AVX2F __attribute__((target("avx2"), noinline))
@@ -154,6 +187,14 @@ static constexpr uint64_t s8_varmask(uint32_t vm) {
         if (((m >> (t - 2)) | (m >> (t - 7)) | (m >> (t - 15)) | (m >> (t - 16))) & 1) m |= 1ull << t;
     return m;
 }
+/* Change only the sequence-dependent state; kw/kc remain problem constants. */
+static constexpr void s8_restate_plan(s8_plan &p, const uint32_t *st0) {
+    for (int i = 0; i < 8; i++) p.st0[i] = st0[i];
+    const uint32_t a = st0[0], b = st0[1], c = st0[2], d = st0[3], e = st0[4], f = st0[5], g = st0[6], h = st0[7];
+    const uint32_t c1 = h + c_S1(e) + ((e & f) ^ (~e & g)) + K256[0];
+    const uint32_t c2 = c_S0(a) + ((a & b) ^ (a & c) ^ (b & c));
+    p.a1c = c1 + c2; p.e1c = d + c1;
+}
 /* wc: the 16 message words (entries of varying words are ignored); st0: initial state */
 static constexpr s8_plan s8_make_plan(const uint32_t *wc, uint32_t vm, const uint32_t *st0) {
     s8_plan p{};
@@ -170,11 +211,7 @@ static constexpr s8_plan s8_make_plan(const uint32_t *wc, uint32_t vm, const uin
         w[t] = ((V >> t) & 1) ? 0u : k;
     }
     for (int t = 0; t < 64; t++) p.kw[t] = K256[t] + w[t];
-    for (int i = 0; i < 8; i++) p.st0[i] = st0[i];
-    const uint32_t a = st0[0], b = st0[1], c = st0[2], d = st0[3], e = st0[4], f = st0[5], g = st0[6], h = st0[7];
-    const uint32_t c1 = h + c_S1(e) + ((e & f) ^ (~e & g)) + K256[0];
-    const uint32_t c2 = c_S0(a) + ((a & b) ^ (a & c) ^ (b & c));
-    p.a1c = c1 + c2; p.e1c = d + c1;
+    s8_restate_plan(p, st0);
     return p;
 }
 static constexpr uint32_t S8_W_DIGEST[16] = {0, 0, 0, 0, 0, 0, 0, 0, 0x80000000u, 0, 0, 0, 0, 0, 0, 256};
@@ -191,7 +228,7 @@ static QSB_SHA_AVX2 void s8_compress_plan(v8u out[8], const v8u *Wv, const s8_pl
     static_assert(VM & 1, "round 0 folding needs a varying word 0");
     constexpr uint64_t V = s8_varmask(VM);
     static_assert((V >> 16) == (~0ull >> 16), "every schedule word must depend on the message");
-    v8u W[64], KW[64];
+    v8u W[64];
     for (int j = 0; j < 16; j++) if ((V >> j) & 1) W[j] = Wv[j];
     /* W16..W31 with the constant terms folded (compile-time structure) */
 #define S8P_W(t) do {                                                                                     \
@@ -207,24 +244,26 @@ static QSB_SHA_AVX2 void s8_compress_plan(v8u out[8], const v8u *Wv, const s8_pl
 #undef S8P_W
     for (int t = 32; t < 64; t++) W[t] = s8_add(s8_add(s8_s1(W[t - 2]), W[t - 7]), s8_add(s8_s0(W[t - 15]), W[t - 16]));
     /* K + W per round; message-independent words come precomputed */
-#define S8P_KW(t) KW[t] = ((V >> (t)) & 1) ? s8_add(s8_set1(K256[t]), W[t]) : s8_set1(P.kw[t]);
+/* Schedule expansion is complete. Reuse entries 1..63 for K+W;
+     * W[0] retain the raw first word for folded round zero. */
+#define S8P_KW(t) W[t] = ((V >> (t)) & 1) ? s8_add(s8_set1(K256[t]), W[t]) : s8_set1(P.kw[t]);
     S8P_KW(1) S8P_KW(2) S8P_KW(3) S8P_KW(4) S8P_KW(5) S8P_KW(6) S8P_KW(7) S8P_KW(8)
     S8P_KW(9) S8P_KW(10) S8P_KW(11) S8P_KW(12) S8P_KW(13) S8P_KW(14) S8P_KW(15)
 #undef S8P_KW
-    for (int t = 16; t < 64; t++) KW[t] = s8_add(s8_set1(K256[t]), W[t]);
+    for (int t = 16; t < 64; t++) W[t] = s8_add(s8_set1(K256[t]), W[t]);
     /* round 0 from the scalar state: the new a is kept in h, the new e in d (S8_ROUND's naming) */
     v8u a = s8_set1(P.st0[0]), b = s8_set1(P.st0[1]), c = s8_set1(P.st0[2]), d = s8_add(W[0], s8_set1(P.e1c));
     v8u e = s8_set1(P.st0[4]), f = s8_set1(P.st0[5]), g = s8_set1(P.st0[6]), h = s8_add(W[0], s8_set1(P.a1c));
     v8u bc = s8_set1(P.st0[0] ^ P.st0[1]);
-    S8_ROUND(h, a, b, c, d, e, f, g, KW[1], bc); S8_ROUND(g, h, a, b, c, d, e, f, KW[2], bc);
-    S8_ROUND(f, g, h, a, b, c, d, e, KW[3], bc); S8_ROUND(e, f, g, h, a, b, c, d, KW[4], bc);
-    S8_ROUND(d, e, f, g, h, a, b, c, KW[5], bc); S8_ROUND(c, d, e, f, g, h, a, b, KW[6], bc);
-    S8_ROUND(b, c, d, e, f, g, h, a, KW[7], bc);
+    S8_ROUND(h, a, b, c, d, e, f, g, W[1], bc); S8_ROUND(g, h, a, b, c, d, e, f, W[2], bc);
+    S8_ROUND(f, g, h, a, b, c, d, e, W[3], bc); S8_ROUND(e, f, g, h, a, b, c, d, W[4], bc);
+    S8_ROUND(d, e, f, g, h, a, b, c, W[5], bc); S8_ROUND(c, d, e, f, g, h, a, b, W[6], bc);
+    S8_ROUND(b, c, d, e, f, g, h, a, W[7], bc);
     for (int t = 8; t < 64; t += 8) {
-        S8_ROUND(a, b, c, d, e, f, g, h, KW[t + 0], bc); S8_ROUND(h, a, b, c, d, e, f, g, KW[t + 1], bc);
-        S8_ROUND(g, h, a, b, c, d, e, f, KW[t + 2], bc); S8_ROUND(f, g, h, a, b, c, d, e, KW[t + 3], bc);
-        S8_ROUND(e, f, g, h, a, b, c, d, KW[t + 4], bc); S8_ROUND(d, e, f, g, h, a, b, c, KW[t + 5], bc);
-        S8_ROUND(c, d, e, f, g, h, a, b, KW[t + 6], bc); S8_ROUND(b, c, d, e, f, g, h, a, KW[t + 7], bc);
+        S8_ROUND(a, b, c, d, e, f, g, h, W[t + 0], bc); S8_ROUND(h, a, b, c, d, e, f, g, W[t + 1], bc);
+        S8_ROUND(g, h, a, b, c, d, e, f, W[t + 2], bc); S8_ROUND(f, g, h, a, b, c, d, e, W[t + 3], bc);
+        S8_ROUND(e, f, g, h, a, b, c, d, W[t + 4], bc); S8_ROUND(d, e, f, g, h, a, b, c, W[t + 5], bc);
+        S8_ROUND(c, d, e, f, g, h, a, b, W[t + 6], bc); S8_ROUND(b, c, d, e, f, g, h, a, W[t + 7], bc);
     }
     out[0] = s8_add(s8_set1(P.st0[0]), a);
     if (!H0ONLY) {
@@ -257,8 +296,8 @@ s9_compress_plan(v8u out[8], const v8u *Wv, uint32_t sout[8], const uint32_t *Sv
     static_assert(VM & 1, "round 0 folding needs a varying word 0");
     constexpr uint64_t V = s8_varmask(VM);
     static_assert((V >> 16) == (~0ull >> 16), "every schedule word must depend on the message");
-    v8u W[64], KW[64];
-    uint32_t SW[64], SKW[64];
+    v8u W[64];
+    uint32_t SW[64];
     for (int j = 0; j < 16; j++) { if ((V >> j) & 1) W[j] = Wv[j]; SW[j] = ((V >> j) & 1) ? Sv[j] : 0u; }
 #define S8P_W(t) do {                                                                                     \
         v8u acc_; int has_ = 0;                                                                           \
@@ -277,12 +316,14 @@ s9_compress_plan(v8u out[8], const v8u *Wv, uint32_t sout[8], const uint32_t *Sv
         W[t] = s8_add(s8_add(s8_s1(W[t - 2]), W[t - 7]), s8_add(s8_s0(W[t - 15]), W[t - 16]));
         SW[t] = s1_s1(SW[t - 2]) + SW[t - 7] + s1_s0(SW[t - 15]) + SW[t - 16];
     }
-#define S8P_KW(t) KW[t] = ((V >> (t)) & 1) ? s8_add(s8_set1(K256[t]), W[t]) : s8_set1(P.kw[t]); \
-                  SKW[t] = ((V >> (t)) & 1) ? K256[t] + SW[t] : P.kw[t];
+/* Schedule expansion is complete. Reuse entries 1..63 for K+W;
+     * W[0] and SW[0] retain the raw first word for folded round zero. */
+#define S8P_KW(t) W[t] = ((V >> (t)) & 1) ? s8_add(s8_set1(K256[t]), W[t]) : s8_set1(P.kw[t]); \
+                  SW[t] = ((V >> (t)) & 1) ? K256[t] + SW[t] : P.kw[t];
     S8P_KW(1) S8P_KW(2) S8P_KW(3) S8P_KW(4) S8P_KW(5) S8P_KW(6) S8P_KW(7) S8P_KW(8)
     S8P_KW(9) S8P_KW(10) S8P_KW(11) S8P_KW(12) S8P_KW(13) S8P_KW(14) S8P_KW(15)
 #undef S8P_KW
-    for (int t = 16; t < 64; t++) { KW[t] = s8_add(s8_set1(K256[t]), W[t]); SKW[t] = K256[t] + SW[t]; }
+    for (int t = 16; t < 64; t++) { W[t] = s8_add(s8_set1(K256[t]), W[t]); SW[t] = K256[t] + SW[t]; }
     v8u a = s8_set1(P.st0[0]), b = s8_set1(P.st0[1]), c = s8_set1(P.st0[2]), d = s8_add(W[0], s8_set1(P.e1c));
     v8u e = s8_set1(P.st0[4]), f = s8_set1(P.st0[5]), g = s8_set1(P.st0[6]), h = s8_add(W[0], s8_set1(P.a1c));
     v8u bc = s8_set1(P.st0[0] ^ P.st0[1]);
@@ -290,7 +331,7 @@ s9_compress_plan(v8u out[8], const v8u *Wv, uint32_t sout[8], const uint32_t *Sv
     uint32_t se = P.st0[4], sf = P.st0[5], sg = P.st0[6], sh = SW[0] + P.a1c;
     uint32_t sbc = P.st0[0] ^ P.st0[1];
 #define S9_R(A, B, C, D, E, F, G, H, t) \
-    S8_ROUND(A, B, C, D, E, F, G, H, KW[t], bc); S1_ROUND(s##A, s##B, s##C, s##D, s##E, s##F, s##G, s##H, SKW[t], sbc);
+    S8_ROUND(A, B, C, D, E, F, G, H, W[t], bc); S1_ROUND(s##A, s##B, s##C, s##D, s##E, s##F, s##G, s##H, SW[t], sbc);
     S9_R(h, a, b, c, d, e, f, g, 1) S9_R(g, h, a, b, c, d, e, f, 2)
     S9_R(f, g, h, a, b, c, d, e, 3) S9_R(e, f, g, h, a, b, c, d, 4)
     S9_R(d, e, f, g, h, a, b, c, 5) S9_R(c, d, e, f, g, h, a, b, 6)

@@ -286,6 +286,35 @@ w[15] += s1(w[13]) + w[8] + s0(w[0]) + QSB_Z;\
     out0 = t1 + S0(b) + Maj(b,c,d); \
     out4 = e + t1 + (F4mF0);
 
+#ifndef QSB_PREP_IV1
+#define QSB_PREP_IV1 1
+#endif
+#if QSB_PREP_IV1
+/* Keep rotate-adds and TM - Maj in PTX so the front end cannot undo the fusion.
+ * This is the IV1 form from PINCYC, confined to prepare's outer digest. */
+__device__ __forceinline__ uint32_t qsb_piv_ror6(uint32_t x, uint32_t y) {
+    uint32_t r;
+    asm("{\n\t.reg .u32 t;\n\tshf.r.wrap.b32 t, %2, %2, 6;\n\tadd.u32 %0, %1, t;\n\t}" : "=r"(r) : "r"(x), "r"(y));
+    return r;
+}
+__device__ __forceinline__ uint32_t qsb_piv_ror2(uint32_t x, uint32_t y) {
+    uint32_t r;
+    asm("{\n\t.reg .u32 t;\n\tshf.r.wrap.b32 t, %2, %2, 2;\n\tadd.u32 %0, %1, t;\n\t}" : "=r"(r) : "r"(x), "r"(y));
+    return r;
+}
+__device__ __forceinline__ uint32_t qsb_piv_subadd(uint32_t t, uint32_t m, uint32_t y) {
+    uint32_t r;
+    asm("{\n\t.reg .u32 u;\n\tsub.u32 u, %1, %2;\n\tadd.u32 %0, u, %3;\n\t}" : "=r"(r) : "r"(t), "r"(m), "r"(y));
+    return r;
+}
+#define QSB_PREP_IV_ROUNDS01(W0, W1) { \
+    QSB_IV_ROUND0(W0) \
+    const uint32_t m1_ = h & (QSB_IV0 ^ QSB_IV1); \
+    const uint32_t tm_ = qsb_piv_ror6(g + Ch(d,e,f) + (qsb_klit(1) + (QSB_IV0 & QSB_IV1)) + (W1) + m1_, QSB_S1P(d)); \
+    g = qsb_piv_ror2(tm_, QSB_S0P(h)); \
+    c = qsb_piv_subadd(tm_, m1_, QSB_IV2 - (QSB_IV0 & QSB_IV1)); }
+#endif
+
 /* SHA256d second compression of a 32-byte message m[0..7] (pad W8=0x80000000,
  * W9..14=0, W15=256) from the IV. Bit-identical to _SHA256TransformDigest32. */
 __device__ __forceinline__ void _SHA256TransformDigest32Q(
@@ -300,7 +329,11 @@ __device__ __forceinline__ void _SHA256TransformDigest32Q(
 #pragma unroll
     for (int i = 0; i < 8; i++) w[i] = m[i];
 
+#if QSB_PREP_IV1
+    QSB_PREP_IV_ROUNDS01(w[0], w[1]);
+#else
     QSB_IV_ROUNDS01(w[0], w[1]);
+#endif
     QSB_RLK(g, h, a, b, c, d, e, f, qsb_klit(2) + w[2]);   /* h, d literal (IV5, IV1) */
     QSB_RLK(f, g, h, a, b, c, d, e, qsb_klit(3) + w[3]);   /* h, d literal (IV4, IV0) */
     QSB_RL(e, f, g, h, a, b, c, d, qsb_klit(4) + w[4]);
@@ -370,6 +403,9 @@ __device__ __forceinline__ void _SHA256TransformDigest32Q(
 #ifndef QSB_FIN_KW_IMAD
 #define QSB_FIN_KW_IMAD 1
 #endif
+#ifndef QSB_FIN_SHA_CHIV
+#define QSB_FIN_SHA_CHIV 1
+#endif
 #if QSB_FIN_KW_IMAD
 #define QSB_KWF(K, X) qsb_fadd((X), one, (K))
 /* Rounds 0 and 1 of the pubkey hash (QSB_IV_ROUNDS01 with a..h = IV) written as two-input
@@ -388,6 +424,22 @@ __device__ __forceinline__ void _SHA256TransformDigest32Q(
     c = qsb_fadd(t1, one, QSB_IV2 - (QSB_IV0 & QSB_IV1)); \
     t2 = QSB_FADD_S0IV(t1, h); \
     g = qsb_fadd(t2, one, h & (QSB_IV0 ^ QSB_IV1)); }
+#if QSB_FIN_SHA_CHIV
+/* Keep IV5 in a register: Ch(E1, IV4, IV5) can use one LOP3 with IV4
+ * as its immediate instead of two literal-containing LOP3s. */
+#undef QSB_IV_ROUNDS01_F
+#define QSB_IV_ROUNDS01_F(W0, W1) { \
+    const uint32_t r0t1 = QSB_IV7 + S1(QSB_IV4) + Ch(QSB_IV4, QSB_IV5, QSB_IV6) + qsb_klit(0); \
+    const uint32_t r0t2 = S0(QSB_IV0) + Maj(QSB_IV0, QSB_IV1, QSB_IV2); \
+    d = qsb_fadd((W0), one, QSB_IV3 + r0t1); \
+    h = qsb_fadd((W0), one, r0t1 + r0t2); \
+    t1 = qsb_fadd((W1), one, QSB_IV6 + qsb_klit(1) + (QSB_IV0 & QSB_IV1)); \
+    t1 = QSB_FADD_S1IV(t1, d); \
+    t1 = qsb_fadd(t1, one, Ch(d, QSB_IV4, civ)); \
+    c = qsb_fadd(t1, one, QSB_IV2 - (QSB_IV0 & QSB_IV1)); \
+    t2 = QSB_FADD_S0IV(t1, h); \
+    g = qsb_fadd(t2, one, h & (QSB_IV0 ^ QSB_IV1)); }
+#endif
 #else
 #define QSB_KWF(K, X) K + X
 #define QSB_IV_ROUNDS01_F(W0, W1) QSB_IV_ROUNDS01(W0, W1)
@@ -434,7 +486,7 @@ __device__ __forceinline__ uint32_t qsb_add_ror2(uint32_t x, uint32_t y) {
  * (T1 + S0) + Maj). bit 1: Ch is added to T1 before S1 (measured slower; kept for reference).
  * Sums mod 2^32 are order-independent, so every word is unchanged. */
 #ifndef QSB_FIN_RASSOC
-#define QSB_FIN_RASSOC 0
+#define QSB_FIN_RASSOC 2
 #endif
 #if QSB_FIN_RASSOC & 1
 #define QSB_RL_T1(h, e, f, g, kw) \
@@ -456,7 +508,7 @@ __device__ __forceinline__ uint32_t qsb_add_ror2(uint32_t x, uint32_t y) {
 #define QSB_RL_F(a, b, c, d, e, f, g, h, kw) \
     QSB_RL_T1(h, e, f, g, kw) \
     d  = qsb_fadd(d, one, t1); \
-    t2 = qsb_fadd(QSB_S0M(a), one, Maj(a,b,c)); \
+    t2 = QSB_FADD_S0(Maj(a,b,c), a); \
     h  = qsb_fadd(t1, one, t2);
 #else
 #define QSB_RL_F(a, b, c, d, e, f, g, h, kw) \
@@ -544,8 +596,24 @@ QSB_RL_F(b, c, d, e, f, g, h, a, QSB_KWF(qsb_klit(k + 15), w[15]));\
 #ifndef QSB_FIN_W24_O8
 #define QSB_FIN_W24_O8 1
 #endif
+/* QSB_FIN_FK_LEA (kill switch): rounds 2 and 3 of the pubkey hash (QSB_RL_FK, the IV-literal h
+ * rounds) take their two Sigma adds through the same rotate-add as every other round under
+ * QSB_FIN_LEA: x + S1(e) = x + ROR6(QSB_S1P(e)), x + S0(a) = x + ROR2(QSB_S0P(a)). Each Sigma's
+ * outer rotation rides in the add, so its multiply-pipe add is gone; the same addends mod 2^32. */
+#ifndef QSB_FIN_FK_LEA
+#define QSB_FIN_FK_LEA 1
+#endif
 #if QSB_SHA_FMA_ADD
 /* QSB_RL_F with a literal h folded into the round constant: KH = K_i + h. */
+#if QSB_FIN_FK_LEA && QSB_FIN_LEA
+#define QSB_RL_FK(a, b, c, d, e, f, g, h, W, KH) \
+    t1 = qsb_fadd((W), one, (KH)); \
+    t1 = qsb_fadd(t1, one, Ch(e,f,g)); \
+    t1 = QSB_FADD_S1(t1, e); \
+    d  = qsb_fadd(d, one, t1); \
+    t2 = QSB_FADD_S0(t1, a); \
+    h  = qsb_fadd(t2, one, Maj(a,b,c));
+#else
 #define QSB_RL_FK(a, b, c, d, e, f, g, h, W, KH) \
     t1 = qsb_fadd((W), one, (KH)); \
     t1 = qsb_fadd(t1, one, QSB_S1M(e)); \
@@ -553,6 +621,7 @@ QSB_RL_F(b, c, d, e, f, g, h, a, QSB_KWF(qsb_klit(k + 15), w[15]));\
     d  = qsb_fadd(d, one, t1); \
     t2 = qsb_fadd(t1, one, QSB_S0M(a)); \
     h  = qsb_fadd(t2, one, Maj(a,b,c));
+#endif
 #endif
 
 /* Word 0 of SHA-256(33-byte compressed pubkey): live words m[0..8], W9..14=0,
@@ -576,6 +645,9 @@ __device__ __forceinline__ uint32_t _SHA256Pubkey33H0(const uint32_t m[9])
 #if QSB_SHA_FMA_ADD && QSB_SHA_FMA_EARLY
     {
         const uint32_t one = pin_one_mul;
+#if QSB_FIN_SHA_CHIV && QSB_FIN_KW_IMAD
+        const uint32_t civ = qsb_fadd(QSB_IV5, one, 0u);
+#endif
         QSB_IV_ROUNDS01_F(w[0], w[1]);
 #if QSB_FIN_IVFOLD
         /* h role: f = IV5 in round 2, e = IV4 in round 3 (both still the IV literals) */

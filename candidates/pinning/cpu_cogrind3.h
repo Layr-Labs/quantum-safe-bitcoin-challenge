@@ -57,7 +57,7 @@ static cpu_set_t g_worker_set; static int g_worker_set_on = 0;
 #endif
 #define QSB_CG_BMAX QSB_CG_B
 #ifndef QSB_CG_PF
-#define QSB_CG_PF 4                       /* table prefetch distance, in 4-candidate blocks */
+#define QSB_CG_PF 2                       /* retained denominator/y cache: prefetch only next table window */
 #endif
 #define QSB_CG_MAXWIN 16
 #define QSB_CG_MAXW 256                   /* max worker threads */
@@ -144,6 +144,11 @@ struct shared_t {
     tentry *table; size_t table_bytes;
     uint64_t ax_w[4], ay_w[4];            /* A = u2 R */
     uint64_t dx_w[4], dy_w[4];            /* D = -2A */
+    uint32_t w0_tmpl[16];                 /* first-block words with all sequence bytes cleared */
+    int seq_word[4], seq_shift[4];
+    qcg_sha::scalar_prefix_plan sequence_prefix; /* immutable first-block round prefix */
+    qcg_sha::s8_plan sequence_plan;       /* immutable message schedule, copied once per worker */
+    int sequence_tfast;
     uint32_t w1_tmpl[16];                 /* suffix block 1 words with the locktime bytes cleared */
     int lt_word[4], lt_shift[4];          /* where locktime byte b lands in block 1 */
     int hit_fd;
@@ -326,21 +331,12 @@ static unsigned recode_all(worker_t *w, int np) {
 /* ---------------- SHA front end ---------------- */
 static void seq_midstate(worker_t *w, uint32_t seq) {
     shared_t *S = g_cg; const pinning2_params_t *pp = S->pp;
-    uint8_t m[128]; memset(m, 0, 128);
-    memcpy(m, pp->suffix, pp->suffix_len);
-    for (int b = 0; b < 4; b++) m[pp->seq_offset + b] = (uint8_t)(seq >> (8 * b));
-    m[pp->suffix_len] = 0x80;
-    const uint64_t bits = (uint64_t)pp->total_preimage_len * 8;
-    const int lenoff = S->nblk * 64 - 8;
-    for (int b = 0; b < 8; b++) m[lenoff + 7 - b] = (uint8_t)(bits >> (8 * b));
-    uint32_t wv[16];
-    for (int i = 0; i < 16; i++) wv[i] = (uint32_t)m[4 * i] << 24 | (uint32_t)m[4 * i + 1] << 16 | (uint32_t)m[4 * i + 2] << 8 | m[4 * i + 3];
-    memcpy(w->mid1, pp->midstate, 32);
-    qcg_sha::sha_compress_ref(w->mid1, wv);
+    uint32_t wv[16]; memcpy(wv, S->w0_tmpl, sizeof wv);
+    for (int b = 0; b < 4; b++)
+        wv[S->seq_word[b]] |= ((seq >> (8 * b)) & 0xFFu) << S->seq_shift[b];
+    qcg_sha::sha_compress_prefix_plan(w->mid1, wv, S->sequence_prefix);
     /* block 1: words 0 and 1 vary with the locktime, words 2..15 are problem constants */
-    w->tfast = 1;
-    for (int b = 0; b < 4; b++) if (S->lt_word[b] < 0 || S->lt_word[b] > 1) w->tfast = 0;
-    w->tplan = qcg_sha::s8_make_plan(S->w1_tmpl, 0x3u, w->mid1);
+    qcg_sha::s8_restate_plan(w->tplan, w->mid1);
 }
 
 /* generic (any layout) scalar z for one candidate */
@@ -536,6 +532,8 @@ static void *worker_main(void *arg) {
     worker_t *w = (worker_t *)aligned_alloc(64, (sizeof(worker_t) + 63) & ~(size_t)63);
     if (!w) return NULL;
     w->id = id; w->cur_seq_tag = 0;
+    w->tfast = 0;
+    if (S->cache_first) { w->tplan = S->sequence_plan; w->tfast = S->sequence_tfast; }
     w->grp = EC_GROUP_new_by_curve_name(NID_secp256k1);
     w->ctx = BN_CTX_new(); w->order = BN_new(); w->nri = BN_new(); w->rx = BN_new(); w->ry = BN_new();
     w->Ru2 = w->grp ? EC_POINT_new(w->grp) : NULL;
@@ -879,16 +877,26 @@ static int start(const pinning2_params_t *pp, uint32_t lt_min, uint32_t lt_max) 
     }
     if (!S->cache_first) S->sha_env = 0;   /* non-standard layout: generic scalar SHA */
     S->ec_mode.store(-1); S->sha_mode.store(0); S->sha_x9.store(0);
-    /* suffix block 1 template and the locktime byte positions */
+    /* Immutable first/second block templates and message-only SHA plan.
+     * Fully initialized before table_start and before any worker is created. */
     if (S->cache_first) {
         uint8_t m[128]; memset(m, 0, 128);
         memcpy(m, pp->suffix, pp->suffix_len);
         for (int b = 0; b < 4; b++) m[pp->lt_offset + b] = 0;
+        for (int b = 0; b < 4; b++) {
+            const int p = (int)pp->seq_offset + b;
+            m[p] = 0; S->seq_word[b] = p >> 2; S->seq_shift[b] = 8 * (3 - (p & 3));
+        }
         m[pp->suffix_len] = 0x80;
         const uint64_t bits = (uint64_t)pp->total_preimage_len * 8;
         for (int b = 0; b < 8; b++) m[120 + 7 - b] = (uint8_t)(bits >> (8 * b));
+        for (int i = 0; i < 16; i++) S->w0_tmpl[i] = (uint32_t)m[4 * i] << 24 | (uint32_t)m[4 * i + 1] << 16 | (uint32_t)m[4 * i + 2] << 8 | m[4 * i + 3];
+        S->sequence_prefix = qcg_sha::sha_make_prefix_plan(pp->midstate, S->w0_tmpl, (int)(pp->seq_offset / 4));
         for (int i = 0; i < 16; i++) S->w1_tmpl[i] = (uint32_t)m[64 + 4 * i] << 24 | (uint32_t)m[64 + 4 * i + 1] << 16 | (uint32_t)m[64 + 4 * i + 2] << 8 | m[64 + 4 * i + 3];
         for (int b = 0; b < 4; b++) { const int p = (int)pp->lt_offset + b - 64; S->lt_word[b] = p >> 2; S->lt_shift[b] = 8 * (3 - (p & 3)); }
+        S->sequence_plan = qcg_sha::s8_make_plan(S->w1_tmpl, 0x3u, pp->midstate);
+        S->sequence_tfast = 1;
+        for (int b = 0; b < 4; b++) if (S->lt_word[b] < 0 || S->lt_word[b] > 1) S->sequence_tfast = 0;
     }
     mkdir("results", 0755);
     S->hit_fd = open("results/pinning_hit_cpu.txt", O_WRONLY | O_CREAT | O_APPEND, 0644);
