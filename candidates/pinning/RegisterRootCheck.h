@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: GPL-3.0-only */
-// Official-runtime correctness check only; no timing/calibration or local execution.
+/* Official-runtime correctness check only; no timing/calibration or local execution. */
 #pragma once
 /* Direct helper check is startup correctness work, never timed or used to tune. */
 __global__ void qsb_prefix_field_check_kernel(uint32_t *data){

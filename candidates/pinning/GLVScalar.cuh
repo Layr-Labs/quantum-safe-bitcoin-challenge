@@ -218,7 +218,7 @@ __host__ __device__ __forceinline__ uint32_t q11_bigtbl_code(
     return (q9_bigtbl_offset(c)+idx)|((neg_digit^sign)<<31);
 }
 #endif
-// END QSB_BIGTBL_HOST_EXACT
+/* END QSB_BIGTBL_HOST_EXACT */
 
 #if QSB_DIGIT_LEAN
 /* QSB_DIGIT_LEAN: the same 32-bit code as q9_bigtbl_code(mag,sign,c), written so that
@@ -647,8 +647,8 @@ __device__ __forceinline__ uint64_t q9_madw(uint32_t a,uint32_t b,uint64_t c){
     uint64_t r;asm("mad.wide.u32 %0,%1,%2,%3;":"=l"(r):"r"(a),"r"(b),"l"(c));return r;
 }
 #endif
-// GLV lattice and rounded-reciprocal constants from bitcoin-core/secp256k1
-// v0.6.0 scalar_impl.h, Copyright (c) 2014 Pieter Wuille, MIT.
+/* GLV lattice and rounded-reciprocal constants from bitcoin-core/secp256k1 */
+/* v0.6.0 scalar_impl.h, Copyright (c) 2014 Pieter Wuille, MIT. */
 // The original MIT license is supplied as COPYING-secp256k1.
 #ifndef QSB_GLV_HIGH15
 #define QSB_GLV_HIGH15 1
@@ -734,6 +734,12 @@ __device__ __forceinline__ void q9_high15_begin(uint64_t *acc,uint32_t *overflow
  * product words. All omitted terms are nonnegative and below 9*2^352 for g1,
  * 8*2^352 for g2. Widening the bit-383 rounding guard preserves exactness.
  * test_glv_coeff.py computes the bound and exercises the actual function. */
+#ifndef QSB_GLV_HI10_PAIR
+#define QSB_GLV_HI10_PAIR 0
+#endif
+#if QSB_GLV_HI10_PAIR != 0 && QSB_GLV_HI10_PAIR != 1
+#error "QSB_GLV_HI10_PAIR must be 0 or 1"
+#endif
 #ifndef QSB_GLV_HIGH10_HI
 #define QSB_GLV_HIGH10_HI 1
 #endif
@@ -779,7 +785,13 @@ __device__ __forceinline__ void q9_coeff_high15(uint64_t out[2],const uint64_t k
 #if QSB_GLV_HIGH10_HI
     // b7+b6 < 2^32 for both production reciprocals: the first sum fits u32.
     const uint32_t first=q9_mulhi32(a3,b7)+q9_mulhi32(a4,b6);
+#if QSB_GLV_HI10_PAIR
+    /* b4+b3 is 0xd02f7529 (g1) or 0x2cd1ed70 (g2), so this pair fits u32. */
+    const uint32_t last=q9_mulhi32(a6,b4)+q9_mulhi32(a7,b3);
+    carry=(uint64_t)first+q9_mulhi32(a5,b5)+last;
+#else
     carry=(uint64_t)first+q9_mulhi32(a5,b5)+q9_mulhi32(a6,b4)+q9_mulhi32(a7,b3);
+#endif
     w10=0;
 #else
     q9_high15_begin(&acc,&overflow,carry,q9_mulw(a3,b7),q9_mulw(a4,b6));
