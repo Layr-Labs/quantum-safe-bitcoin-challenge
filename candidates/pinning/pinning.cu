@@ -8,7 +8,7 @@
 #endif
 /* l2state variant fkF20c8 + split retry */
 #ifndef QSB_SUB_FINE
-#define QSB_SUB_FINE 1
+#define QSB_SUB_FINE 0 /* native 131072-candidate sub-batches with the matching fused K8 carrier */
 #endif
 #if QSB_SUB_FINE
 #define QSB_SUBPIPE 65536
@@ -7446,6 +7446,8 @@ int main(int argc, char **argv) {
 #else
 #define QSB_SEQ_GROUP 1
 #endif
+    SHA256_CTX seq_ctx;
+    if (fast_tail) SHA256_Init(&seq_ctx);
     /* QSB_ASICBOOST: each host batch covers the group's QSB_SEQ_GROUP sequences seq + k*stride at
      * the same locktimes, so the group still enumerates this GPU's sequences in order. */
     for (uint32_t seq = SEQ_MIN + effective_id; ; seq += QSB_SEQ_GROUP * (uint32_t)effective_total) {
@@ -7456,11 +7458,9 @@ int main(int argc, char **argv) {
                 uint8_t block[64];
                 memcpy(block, pp.suffix, sizeof(block));
                 for(int i=0;i<4;i++) block[pp.seq_offset+i]=(uint8_t)(sk>>(8*i));
-                SHA256_CTX ctx;
-                SHA256_Init(&ctx);
-                for(int i=0;i<8;i++) ctx.h[i]=pp.midstate[i];
-                SHA256_Transform(&ctx,block);
-                for(int i=0;i<8;i++) cur_mid[i]=ctx.h[i];
+                for(int i=0;i<8;i++) seq_ctx.h[i]=pp.midstate[i];
+                SHA256_Transform(&seq_ctx,block);
+                for(int i=0;i<8;i++) cur_mid[i]=seq_ctx.h[i];
             } else {
                 for(int i=0;i<8;i++) cur_mid[i]=pp.midstate[i];
             }
@@ -7668,7 +7668,7 @@ int main(int argc, char **argv) {
 #endif
 
             /* Check if another GPU found it */
-            if ((total_searched % (50*1024*1024)) < (uint64_t)BATCH) {
+            if (num_gpus > 1 && (total_searched % (50*1024*1024)) < (uint64_t)BATCH) {
                 char check[256];
                 for (int g = 0; g < num_gpus; g++) {
                     if (g == gpu_index) continue;
@@ -7811,7 +7811,7 @@ int main(int argc, char **argv) {
             }
 
             /* Check if another GPU found it */
-            if ((total_searched % (50*1024*1024)) < (uint64_t)BATCH) {
+            if (num_gpus > 1 && (total_searched % (50*1024*1024)) < (uint64_t)BATCH) {
                 char check[256];
                 for (int g = 0; g < num_gpus; g++) {
                     if (g == gpu_index) continue;
