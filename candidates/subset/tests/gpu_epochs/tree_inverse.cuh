@@ -194,7 +194,17 @@ __shared__ uint64_t qsb_sc_products[4][512];
 #endif
 #if QSB_TREE_ROW128
 #define QTR_LD4(A,col,v) do{const ulonglong2 qtr0_=(A)[0][(col)],qtr1_=(A)[1][(col)];(v)[0]=qtr0_.x;(v)[1]=qtr0_.y;(v)[2]=qtr1_.x;(v)[3]=qtr1_.y;}while(0)
+#if QSB_C3_TREE_GLUE & 64
+/* cut3 R3, QSB_C3_TREE_GLUE bit 6 (tree.cu): the same four words to the same bytes (row 0 = {v0, v1}, row 1 = {v2, v3} of
+ * column col) as four 64-bit stores, so the product's words need no copies into an aligned 4-register group.
+ * st.volatile: ptxas merges two adjacent plain 64-bit stores back into one 16-byte store (and its copies). */
+#define QTR_ST4(A,col,v) do{const uint32_t qtr_a_=(uint32_t)__cvta_generic_to_shared(&(A)[0][(col)]); \
+    asm volatile("st.volatile.shared.u64 [%0],%1;\n\tst.volatile.shared.u64 [%0+8],%2;" :: "r"(qtr_a_),"l"((v)[0]),"l"((v)[1]) : "memory"); \
+    asm volatile("st.volatile.shared.u64 [%0],%1;\n\tst.volatile.shared.u64 [%0+8],%2;" :: "r"((uint32_t)__cvta_generic_to_shared(&(A)[1][(col)])),"l"((v)[2]),"l"((v)[3]) : "memory"); \
+    }while(0)
+#else
 #define QTR_ST4(A,col,v) do{(A)[0][(col)]=make_ulonglong2((v)[0],(v)[1]);(A)[1][(col)]=make_ulonglong2((v)[2],(v)[3]);}while(0)
+#endif
 #endif
 /* QSB_ROOT_COMBINE (tree.cu switch block): the protocol lives in root_combine.cuh and is compiled only into the
  * native sm_89 image (sm_70+ atomics with .acquire/.release and __nanosleep). The JIT / ranked sm_52 pass keeps the
@@ -280,7 +290,13 @@ __device__ __forceinline__ void qsb_block_inverse_tree(uint64_t *value){
         if(RW?(unsigned)ut<(unsigned)half:tid<half){
 #else
         const int ut=tid;
+#if QSB_C3_TREE_GLUE & 32
+        /* cut3 R3, QSB_C3_TREE_GLUE bit 5 (tree.cu): half >= 32 is a multiple of 32, so tid < half is one value per warp and
+         * the full-warp vote returns it on every lane: a warp-uniform branch, no BSSY/BSYNC bracket. */
+        if(half>=32?__any_sync(0xffffffffu,tid<half):tid<half){
+#else
         if(tid<half){
+#endif
 #endif
             uint64_t a[5],b[5],out[5];
 #if QSB_TREE_ROW128
@@ -545,7 +561,11 @@ __device__ __forceinline__ void qsb_block_inverse_tree(uint64_t *value){
         if(RW?(unsigned)ut<(unsigned)count:tid<count){
 #else
         const int ut=tid;
+#if QSB_C3_TREE_GLUE & 32
+        if(__any_sync(0xffffffffu,tid<count)){   /* cut3 R3, QSB_C3_TREE_GLUE bit 5: count >= 32 here (see the up levels) */
+#else
         if(tid<count){
+#endif
 #endif
             uint64_t parent_inv[5],sibling[5],child_inv[5];
 #if QSB_TREE_ROW128
