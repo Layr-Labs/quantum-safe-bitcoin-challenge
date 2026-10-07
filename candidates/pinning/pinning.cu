@@ -18,7 +18,10 @@
 #define QSB_SUBRING 4 /* SUBRING 4 + SLOTS 5: host pipeline depth measured on intel-r5 (ercumentyildirim 127d95d4) */
 #define QSB_ROOT_FUSED 1
 #ifndef QSB_PERSIST_WINDOW_CAP
-#define QSB_PERSIST_WINDOW_CAP (36u<<20) /* 36 MiB as in ercumentyildirim b62c41b8; HY6 arm (after ercumentyildirim #1892, cefika 482a55e6): 42 MiB table window under an unchanged persisting set-aside; 0 = the base */
+#define QSB_PERSIST_WINDOW_CAP (48u<<20) /* cover the dense prefix; admission budget remains 36 MiB */
+#endif
+#ifndef QSB_PERSIST_ADMISSION_BYTES
+#define QSB_PERSIST_ADMISSION_BYTES (36u<<20)
 #endif
 #define QSB_L2STATE 1033 /* 1 | 8 (state stores evict_last) | 1024 (finish discards consumed state lines); from PR #1891 */
 #ifndef QSB_GREEN
@@ -52,6 +55,7 @@
 #include <time.h>
 #include <sys/stat.h>
 #include <cuda_runtime.h>
+#include "L2Admission.h"
 #include "RecoveryConstant.h"
 
 #ifndef QSB_HOST_GATE
@@ -6939,12 +6943,14 @@ int main(int argc, char **argv) {
             cudaStreamAttrValue av = {};
             av.accessPolicyWindow.base_ptr  = (void *)(d_gt + skip);
             av.accessPolicyWindow.num_bytes = want < (size_t)max_window ? want : (size_t)max_window;
-            av.accessPolicyWindow.hitRatio  = 1.0f;
+            av.accessPolicyWindow.hitRatio  = qsb_l2_admission_ratio(
+                av.accessPolicyWindow.num_bytes, (size_t)QSB_PERSIST_ADMISSION_BYTES);
             av.accessPolicyWindow.hitProp   = cudaAccessPropertyPersisting;
             av.accessPolicyWindow.missProp  = cudaAccessPropertyStreaming;
             cudaError_t pe = cudaStreamSetAttribute(0, cudaStreamAttributeAccessPolicyWindow, &av);
-            printf("  L2 persistence: %.0f MiB pinned (max %.0f MiB, window %.0f MiB) %s\n",
+            printf("  L2 persistence: %.0f MiB policy window, admission %.3f (max %.0f MiB, window %.0f MiB) %s\n",
                    (double)av.accessPolicyWindow.num_bytes/(1024*1024),
+                   (double)av.accessPolicyWindow.hitRatio,
                    (double)max_persist/(1024*1024), (double)max_window/(1024*1024),
                    pe==cudaSuccess?"ok":cudaGetErrorString(pe));
             fflush(stdout);
@@ -7054,7 +7060,8 @@ int main(int argc, char **argv) {
             cudaStreamAttrValue av = {};
             av.accessPolicyWindow.base_ptr  = (void *)(d_gt + skip);
             av.accessPolicyWindow.num_bytes = want < (size_t)max_window ? want : (size_t)max_window;
-            av.accessPolicyWindow.hitRatio  = 1.0f;
+            av.accessPolicyWindow.hitRatio  = qsb_l2_admission_ratio(
+                av.accessPolicyWindow.num_bytes, (size_t)QSB_PERSIST_ADMISSION_BYTES);
             av.accessPolicyWindow.hitProp   = cudaAccessPropertyPersisting;
             av.accessPolicyWindow.missProp  = cudaAccessPropertyStreaming;
             for (int s = 0; s < QSB_SLOTS; s++)
