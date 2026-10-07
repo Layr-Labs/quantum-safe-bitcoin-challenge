@@ -52,8 +52,9 @@ enum QsbCarrierKernel {
     QK_RF,       /* qsb_root_fused<K>             (optional: empty name when absent) */
     QK_RR,       /* qsb_root_register             (optional) */
     QK_PFC,      /* qsb_prefix_field_check_kernel (optional) */
-    QK_LC,
-    QK_CE,
+    QK_DG,       /* kernel_pinning_pipeline<true,3> tail digest (optional) */
+    QK_DH,       /* kernel_pinning_pipeline<true,5> second compression (optional) */
+    QK_CH,       /* kernel_pinning_pipeline<true,4> chain-only prepare (optional) */
     QK_N
 };
 
@@ -129,6 +130,9 @@ static void qsb_carrier_init(const cudaDeviceProp &prop) {
     fixed[QK_RF] = rf_name;
     fixed[QK_RR] = "_Z17qsb_root_registerPmi";
     fixed[QK_PFC] = "_Z29qsb_prefix_field_check_kernelPj";
+    fixed[QK_DG] = "_Z23kernel_pinning_pipelineILb1ELi3EEvPKjPKhiiiijjPKmS5_S5_S5_S5_PhPjS7_iiiP10ulonglong2PmSA_12qsb_tail_pre";
+    fixed[QK_DH] = "_Z23kernel_pinning_pipelineILb1ELi5EEvPKjPKhiiiijjPKmS5_S5_S5_S5_PhPjS7_iiiP10ulonglong2PmSA_12qsb_tail_pre";
+    fixed[QK_CH] = "_Z23kernel_pinning_pipelineILb1ELi4EEvPKjPKhiiiijjPKmS5_S5_S5_S5_PhPjS7_iiiP10ulonglong2PmSA_12qsb_tail_pre";
     int all = 1;
     for (int i = 0; i < QK_N; i++) {
         g_qsb_carrier.k[i] = nullptr;
