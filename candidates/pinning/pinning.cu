@@ -312,7 +312,28 @@ static_assert(alignof(ulonglong2) == 16, "pipeline vector must be 16-byte aligne
 #if QSB_QMIX5 && (QSB_QMIX5_N < 1 || QSB_QMIX5_N >= QSB_QMIX5)
 #error "QSB_QMIX5_N must satisfy 1 <= N < QSB_QMIX5"
 #endif
+/* Spread the five/six-term Q mix across warps rather than entire blocks. Each
+ * warp keeps one decoder and chain length, while every 128-thread block gets
+ * two warps of each kind at the default 4/8 ratio. This avoids separating the
+ * cold-gather-heavy and addition-heavy work onto different resident blocks.
+ * Both users of the predicate run in the same thread: digit decoding and the
+ * chain's first-term selection therefore still agree. The digit arena has a
+ * separate threadIdx.x column for every lane; the mixed chains finish before
+ * the later block-wide product-tree barriers.
+ * Set the switch to 0 to recover the original block-uniform assignment. */
+#ifndef QSB_QMIX5_WARP
+#define QSB_QMIX5_WARP 1
+#endif
+#if QSB_QMIX5_WARP != 0 && QSB_QMIX5_WARP != 1
+#error "QSB_QMIX5_WARP must be 0 or 1"
+#endif
+#if QSB_QMIX5_WARP
+#define QSB_QMIX5_SEL() \
+    (((((blockIdx.x*(unsigned)(QSB_TREE_N/32))+(threadIdx.x>>5)) \
+       *(unsigned)QSB_QMIX5_N)&(QSB_QMIX5-1u))<(unsigned)QSB_QMIX5_N)
+#else
 #define QSB_QMIX5_SEL() (((blockIdx.x*(unsigned)QSB_QMIX5_N)&(QSB_QMIX5-1u))<(unsigned)QSB_QMIX5_N)
+#endif
 
 #ifndef QSB_QMIX5_COLDPOL
 #define QSB_QMIX5_COLDPOL 1
