@@ -9,7 +9,7 @@
 #pragma once
 // QSB_RMAC_TAIL (kill switch, default 1): the reduction tail drops four carries that are set
 // with probability below 2^-21 each on the hashed operands (carry out of r3 + x14*977 and of
-// h3 + x15*977, both adds of a < 2^42 product to a uniform 64-bit word; carry out of
+/* h3 + x15*977, both adds of a < 2^42 product to a uniform 64-bit word; carry out of */
 /* z8 = k16 + w7 and of {z0,z8+k16} + z8*977) and stops the second fold's carry at z3. A dropped */
 /* carry only changes that one candidate's recovered ordinate, which the host exact gate */
 /* would reject: a candidate lost with probability < 2^-19, never a false hit. 0 is the */

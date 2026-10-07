@@ -174,20 +174,20 @@ __device__ __forceinline__ uint32_t qsb_parity_product_window(
     uint64_t mid,top;
     qsb_parity_window_words(mid,top,a,b);
     const uint32_t x7=(uint32_t)mid;
-    // Only bit 32 and bits 0..31 of q are used. u64 overflow is harmless.
+    /* Only bit 32 and bits 0..31 of q are used. u64 overflow is harmless. */
     const uint64_t q=top+977ULL*(top>>32)+x7+(beta[3]>>32);
 #if QSB_PARITY_WINDOW_NARROW
-    // B=2^32 and Dk=sum(a_i*b_j, i+j=k). Omitting D5 changes
-    // floor((D6+floor(D5/B))/B) by at most 6; omitting D12 changes
-    // floor((D13+floor(D12/B))/B) by at most 3. The old top word is
-    // below B^2, so the old q exceeds this q by at most 6+3+977=986
+    /* B=2^32 and Dk=sum(a_i*b_j, i+j=k). Omitting D5 changes */
+    /* floor((D6+floor(D5/B))/B) by at most 6; omitting D12 changes */
+    /* floor((D13+floor(D12/B))/B) by at most 3. The old top word is */
+    /* below B^2, so the old q exceeds this q by at most 6+3+977=986 */
     /* (the 977 term covers a carry into top's high limb). Keep x7 away */
     /* from its last seven values and q from its last 1959+986 values. */
     /* Then the inherited window would also accept, with identical bit-32 */
     /* values of mid and q. All remaining cases keep the full-product path. */
     if(x7<0xfffffff9u && (uint32_t)q<0xfffff47fu) {
 #else
-    // Unknown carries change q by at most 1958. Exclude the final all-one
+    /* Unknown carries change q by at most 1958. Exclude the final all-one */
     /* limb too, so the baseline sum-parity exceptional correction cannot fire. */
     if(x7!=0xffffffffu && (uint32_t)q<0xfffff859u) {
 #endif
