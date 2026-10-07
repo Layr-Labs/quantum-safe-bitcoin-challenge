@@ -132,6 +132,10 @@ static void qsb_carrier_init(const cudaDeviceProp &prop) {
     int all = 1;
     for (int i = 0; i < QK_N; i++) {
         g_qsb_carrier.k[i] = nullptr;
+        /* Reserved slots have no launch sites in this implementation. Keep their
+         * indices for generated-image compatibility, but do not require them
+         * to suppress the unused compute_52 module's startup JIT. */
+        if (i == QK_LC || i == QK_CE) continue;
         const char *name = i < n_gen ? qsb_carrier_kernel_names[i] : fixed[i];
         if (i >= QK_RF) {
             if (!name || !name[0]) name = fixed[i];
