@@ -9,7 +9,7 @@
 #endif
 
 // Four-bank cache geometry from 0xCramJam c13f3832 / 90f89008.
-// Keep the promoted GLV12 geometry as an independently compilable control.
+/* Keep the promoted GLV12 geometry as an independently compilable control. */
 #ifndef QSB_FOUR_HOT
 #define QSB_FOUR_HOT 1
 #endif
@@ -647,7 +647,7 @@ __device__ __forceinline__ uint64_t q9_madw(uint32_t a,uint32_t b,uint64_t c){
     uint64_t r;asm("mad.wide.u32 %0,%1,%2,%3;":"=l"(r):"r"(a),"r"(b),"l"(c));return r;
 }
 #endif
-// GLV lattice and rounded-reciprocal constants from bitcoin-core/secp256k1
+/* GLV lattice and rounded-reciprocal constants from bitcoin-core/secp256k1 */
 // v0.6.0 scalar_impl.h, Copyright (c) 2014 Pieter Wuille, MIT.
 // The original MIT license is supplied as COPYING-secp256k1.
 #ifndef QSB_GLV_HIGH15
@@ -777,7 +777,7 @@ __device__ __forceinline__ void q9_coeff_high15(uint64_t out[2],const uint64_t k
      * products, so overflow counts its lost 2^64 units explicitly. */
 #if QSB_GLV_LEAN
 #if QSB_GLV_HIGH10_HI
-    // b7+b6 < 2^32 for both production reciprocals: the first sum fits u32.
+    /* b7+b6 < 2^32 for both production reciprocals: the first sum fits u32. */
     const uint32_t first=q9_mulhi32(a3,b7)+q9_mulhi32(a4,b6);
     carry=(uint64_t)first+q9_mulhi32(a5,b5)+q9_mulhi32(a6,b4)+q9_mulhi32(a7,b3);
     w10=0;
@@ -1189,23 +1189,42 @@ __device__ __forceinline__ void q9_zdec(uint64_t w[2],uint32_t *top,uint32_t *m3
 #ifndef QSB_ZSPLIT_NOPRE
 #define QSB_ZSPLIT_NOPRE 1
 #endif
-/* Returns q_nonzero | p_nonzero << 1 with p_nonzero = |z1| mod 2^128 != 0, exactly the base's
- * mag != 0: |z| mod 2^128 is 0 exactly when z mod 2^128 is 0. */
-__device__ __forceinline__ unsigned q9_glv_split_z(const uint64_t input[4],uint64_t w1[2],uint64_t w2[2],
-                                                   uint32_t *t1,uint32_t *t2,uint32_t *m1,uint32_t *m2){
+/* Split of q9_glv_split_z: coefficients, then the three 129-bit residual products.
+ * c1,c2 are enough for z2 mod 2^64 = c1[0]*A2 - (c1[0]+c2[0])*A1, which holds Q's
+ * seed1 radix field (bits 18..44) before those products. */
+struct q9_glv_coeff {
+    uint64_t k[4];
+    uint64_t c1[2];
+    uint64_t c2[2];
+};
+/* a1[0]|a1[1]<<32 and a2[0]|a2[1]<<32 of the residual bases. */
+__device__ __forceinline__ uint64_t q9_z2_lo64(uint64_t c10,uint64_t c20) {
+    const uint64_t A1=0xe86c90e49284eb15ULL;
+    const uint64_t A2=0x57c1108d9d44cfd8ULL;
+    return c10*A2-(c10+c20)*A1;
+}
+__device__ __forceinline__ void q9_glv_coeffs_z(const uint64_t input[4],q9_glv_coeff &st){
     const uint64_t n[4]={0xBFD25E8CD0364141ULL,0xBAAEDCE6AF48A03BULL,0xFFFFFFFFFFFFFFFEULL,0xFFFFFFFFFFFFFFFFULL};
-    uint64_t k[4]={input[0],input[1],input[2],input[3]};
+    st.k[0]=input[0];st.k[1]=input[1];st.k[2]=input[2];st.k[3]=input[3];
 #if QSB_ZSPLIT_NOPRE
     (void)n;   /* k >= n needs k[3] == 2^64-1 and k[2] >= 2^64-2: probability < 2^-127 */
 #else
-    if(k[3]==n[3]&&(k[2]>n[2]||(k[2]==n[2]&&(k[1]>n[1]||(k[1]==n[1]&&k[0]>=n[0])))))q9_sub4(k,k,n);
+    if(st.k[3]==n[3]&&(st.k[2]>n[2]||(st.k[2]==n[2]&&(st.k[1]>n[1]||(st.k[1]==n[1]&&st.k[0]>=n[0])))))q9_sub4(st.k,st.k,n);
 #endif
     const uint64_t g1[4]={0xE893209A45DBB031ULL,0x3DAA8A1471E8CA7FULL,0xE86C90E49284EB15ULL,0x3086D221A7D46BCDULL};
     const uint64_t g2[4]={0x1571B4AE8AC47F71ULL,0x221208AC9DF506C6ULL,0x6F547FA90ABFE4C4ULL,0xE4437ED6010E8828ULL};
+    q9_coeff_g1(st.c1,st.k,g1);q9_coeff_g2(st.c2,st.k,g2);
+}
+/* Returns q_nonzero | p_nonzero << 1 with p_nonzero = |z1| mod 2^128 != 0, exactly the base's
+ * mag != 0: |z| mod 2^128 is 0 exactly when z mod 2^128 is 0. */
+__device__ __forceinline__ unsigned q9_glv_split_from_coeffs(const q9_glv_coeff &st,uint64_t w1[2],uint64_t w2[2],
+                                                   uint32_t *t1,uint32_t *t2,uint32_t *m1,uint32_t *m2){
     const uint32_t a1[4]={0x9284eb15,0xe86c90e4,0xa7d46bcd,0x3086d221};
     const uint32_t a2[5]={0x9d44cfd8,0x57c1108d,0xa8e2f3f6,0x14ca50f7,1};
     const uint32_t b1[4]={0x0abfe4c3,0x6f547fa9,0x010e8828,0xe4437ed6};
-    uint64_t c1[2],c2[2];q9_coeff_g1(c1,k,g1);q9_coeff_g2(c2,k,g2);
+    const uint64_t *k=st.k;
+    const uint64_t *c1=st.c1;
+    const uint64_t *c2=st.c2;
 #if QSB_GLV_EO
     /* sum = c1 + c2 (129 bits) and, for P = sum*a1, the word-4 parity addend of q9_product129_r:
      * sum2 (a1[0] odd: sum2*a1*2^128 adds sum2 at bit 128) plus sum words 1 and 2 (a1[3], a1[2]
@@ -1249,5 +1268,11 @@ __device__ __forceinline__ unsigned q9_glv_split_z(const uint64_t input[4],uint6
     const unsigned q_nonzero=(z2.lo|z2.hi)!=0;
     return q_nonzero|(p_nonzero<<1);
 #endif
+}
+__device__ __forceinline__ unsigned q9_glv_split_z(const uint64_t input[4],uint64_t w1[2],uint64_t w2[2],
+                                                   uint32_t *t1,uint32_t *t2,uint32_t *m1,uint32_t *m2){
+    q9_glv_coeff st;
+    q9_glv_coeffs_z(input,st);
+    return q9_glv_split_from_coeffs(st,w1,w2,t1,t2,m1,m2);
 }
 #endif

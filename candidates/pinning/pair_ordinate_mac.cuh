@@ -2,7 +2,7 @@
 /* r = a*b + c*d (mod p) with ONE pseudo-Mersenne reduction: both 512-bit products are */
 // summed carry-complete into a 513-bit value, then reduced with the _ModMultCore C31
 /* tail. Ported from Ryun1 submission 5089a297 (lazy deferred ordinate, generated */
-// asm), carried here by the fixed-base chain as the unmultiplied ordinate pair.
+/* asm), carried here by the fixed-base chain as the unmultiplied ordinate pair. */
 #pragma once
 /* QSB_PO_ALU: the register-plus-carry adds of qsb_mul2add (addc.u32 k, k, 0 and the like,
  * carry-out unused) take the constant-bank zero pin_zero_add as their addend, as QSB_CHAIN_ALU

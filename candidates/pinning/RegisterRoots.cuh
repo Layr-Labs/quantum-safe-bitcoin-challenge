@@ -1,5 +1,5 @@
 /* SPDX-License-Identifier: GPL-3.0-only */
-// Four independent warp trees with register-resident upper nodes and full carries.
+/* Four independent warp trees with register-resident upper nodes and full carries. */
 #pragma once
 #include "WarpInverse.cuh"
 #include "CyclicField.cuh"
@@ -80,7 +80,7 @@ __device__ __forceinline__ void qbw_scratch_get(
 template<int N>
 __device__ __forceinline__ void qsb_block_inverse_register_n(uint64_t *value){
     static_assert(N==128 || N==256,"four- or eight-warp shape");
-    // 56 product / 28 inverse rows per warp. Plane padding rotates limb banks.
+    /* 56 product / 28 inverse rows per warp. Plane padding rotates limb banks. */
     __shared__ uint64_t products[4][(N/32)*56+4];
     __shared__ uint64_t inverses[4][(N/32)*28+4];
     const unsigned tid=threadIdx.x,lane=tid&31u,warp=tid>>5;
@@ -330,7 +330,7 @@ __global__ void __launch_bounds__(128,1) qsb_root_register(uint64_t *roots,int c
     uint64_t total[5];
     {
         uint64_t q[2][5];
-        #pragma unroll 1
+        #pragma unroll
         for(unsigned quartet=0;quartet<2;++quartet) {
 #if QSB_ROOT_WAVE
             if(wave && n>512u){
@@ -373,7 +373,7 @@ __global__ void __launch_bounds__(128,1) qsb_root_register(uint64_t *roots,int c
     /* Fetch BOTH pair products before writing a quartet's weighted outputs. */
     /* Both quartet orders are safe with this rule. This descending order */
     // consumes 4,5 before writing them, then consumes 2,3 before writing 0..3.
-    #pragma unroll 1
+    #pragma unroll
     for(int quartet=1;quartet>=0;--quartet) {
         uint64_t p01[5],p23[5],ip01[5],ip23[5];
         qbw_scratch_get(p01,roots,n,lane+(2u+2u*quartet)*128u);
