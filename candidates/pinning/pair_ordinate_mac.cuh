@@ -61,6 +61,28 @@
 #else
 #define QSB_FA_K "mul.lo.u32 kl, x16, 954529; mul.lo.u32 kh, x16, 1954; mov.b64 kx, {kl, kh};\n"
 #endif
+/* QSB_MAC_K2 (kill switch, default 1): the slope-sum's second fold adds x16*K^2 with
+ * K = 2^32+977. x16, the bit-512 carry of a*b+c*d < 2^513, is 0 or 1, so
+ * x16*K^2 = x16*2^64 + x16*(1954*2^32 + 954529). The 2^64 term is already the
+ * later add of x16 into z2. The low term is 0 or 0x7A2000E90A1. Form z8*977, then
+ * add that constant under x16 != 0. Same 64-bit sft as mul.lo(x16,954529),
+ * mul.lo(x16,1954) and mad.wide(z8,977,kx): z8*977 < 2^42 and the low term < 2^44,
+ * so the sum fits in 64 bits with nothing to carry into z2 beyond the existing x16.
+ * 0 keeps the two mul.lo and the mad.wide. */
+#ifndef QSB_MAC_K2
+#define QSB_MAC_K2 1
+#endif
+#if QSB_MAC_K2 != 0 && QSB_MAC_K2 != 1
+#error "QSB_MAC_K2 must be 0 or 1"
+#endif
+#if QSB_MAC_K2
+#define QSB_FA_K2 \
+  "mul.wide.u32 sft, z8, 977;\n" \
+  "setp.ne.u32 pk, x16, " QSB_PO_Z ";\n" \
+  "@pk add.u64 sft, sft, 0x7A2000E90A1;\n"
+#else
+#define QSB_FA_K2 QSB_FA_K "mad.wide.u32 sft, z8, 977, kx;\n"
+#endif
 __device__ __forceinline__ void qsb_mul2add(uint64_t *r,const uint64_t *a,const uint64_t *b,
                                             const uint64_t *c,const uint64_t *d){
 #ifdef __CUDA_ARCH__
@@ -73,6 +95,7 @@ __device__ __forceinline__ void qsb_mul2add(uint64_t *r,const uint64_t *a,const 
   "\t.reg .u64 ad0,ad1,ad2,ad3,ad4,ad5,ad6;\n"
   "\t.reg .u32 x0,x1,x2,x3,x4,x5,x6,x7,x8,x9,x10,x11,x12,x13,x14,x15,x16,y1,y2,y3,y4,y5,y6,y7,y8,y9,y10,y11,y12,y13,y14;\n"
   "\t.reg .u64 r0,r1,r2,r3,h0,h1,h2,h3,f0,f1,f2,f3,g0,g1,g2,g3,sfa,sft,kx,fq,fa,fb;\n"
+  "\t.reg .pred pk;\n" \
   "\t.reg .u32 z0,z1,z2,z3,z4,z5,z6,z7,z8,w0,w1,w2,w3,w4,w5,w6,w7,sfl,sfh,kl,kh,g8;\n"
   "\tmov.u32 zz, 0;\n"
   QSB_PO_ZDECL
@@ -467,8 +490,7 @@ __device__ __forceinline__ void qsb_mul2add(uint64_t *r,const uint64_t *a,const 
 #else
   "addc.u32 z8, 0, w7;\n"
 #endif
-  QSB_FA_K
-  "mad.wide.u32 sft, z8, 977, kx;\n"
+  QSB_FA_K2
   "mov.b64 sfa, {z0, z1};\n"
   "add.cc.u64 sfa, sfa, sft;\n"
   "addc.u32 z2, z2, x16;\n"
