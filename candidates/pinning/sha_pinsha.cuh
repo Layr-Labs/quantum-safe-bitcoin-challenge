@@ -545,6 +545,23 @@ QSB_RL_F(b, c, d, e, f, g, h, a, QSB_KWF(qsb_klit(k + 15), w[15]));\
 #define QSB_FIN_W24_O8 1
 #endif
 #if QSB_SHA_FMA_ADD
+/* Apply the existing exact rotate-add helpers to the two IV-folded rounds too.
+ * Switch 0 restores their literal approved multiply-pipe formulation. */
+#ifndef QSB_FIN_IVFOLD_LEA
+#define QSB_FIN_IVFOLD_LEA 1
+#endif
+#if QSB_FIN_IVFOLD_LEA != 0 && QSB_FIN_IVFOLD_LEA != 1
+#error "QSB_FIN_IVFOLD_LEA must be 0 or 1"
+#endif
+#if QSB_FIN_IVFOLD_LEA && QSB_FIN_LEA
+#define QSB_RL_FK(a, b, c, d, e, f, g, h, W, KH) \
+    t1 = qsb_fadd((W), one, (KH)); \
+    t1 = qsb_fadd(t1, one, Ch(e,f,g)); \
+    t1 = QSB_FADD_S1(t1, e); \
+    d  = qsb_fadd(d, one, t1); \
+    t2 = QSB_FADD_S0(t1, a); \
+    h  = qsb_fadd(t2, one, Maj(a,b,c));
+#else
 /* QSB_RL_F with a literal h folded into the round constant: KH = K_i + h. */
 #define QSB_RL_FK(a, b, c, d, e, f, g, h, W, KH) \
     t1 = qsb_fadd((W), one, (KH)); \
@@ -553,6 +570,7 @@ QSB_RL_F(b, c, d, e, f, g, h, a, QSB_KWF(qsb_klit(k + 15), w[15]));\
     d  = qsb_fadd(d, one, t1); \
     t2 = qsb_fadd(t1, one, QSB_S0M(a)); \
     h  = qsb_fadd(t2, one, Maj(a,b,c));
+#endif
 #endif
 
 /* Word 0 of SHA-256(33-byte compressed pubkey): live words m[0..8], W9..14=0,
