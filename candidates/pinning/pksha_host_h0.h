@@ -1,4 +1,4 @@
-// SPDX-License-Identifier: GPL-3.0-only
+/* SPDX-License-Identifier: GPL-3.0-only */
 #pragma once
 /* Fixed33-byte compressed-pubkey H0 only. Derived from the reviewed CPU29
  * structured AVX2 SHA schedule; shared co-grind headers are unchanged.

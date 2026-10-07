@@ -15,9 +15,9 @@
  * along with this program. If not, see <http://www.gnu.org/licenses/>.
 */
 
-// ---------------------------------------------------------------------------------
+/* --------------------------------------------------------------------------------- */
 // SHA256
-// ---------------------------------------------------------------------------------
+/* --------------------------------------------------------------------------------- */
 
 __device__ __constant__ uint32_t K[] = {
 	0x428A2F98, 0x71374491, 0xB5C0FBCF, 0xE9B5DBA5,
@@ -159,7 +159,7 @@ __device__ __forceinline__ uint32_t s1(uint32_t x)
 #define Maj(x,y,z) ((x & y) | (z & (x | y)))
 #define Ch(x,y,z) (z ^ (x & (y ^ z)))
 
-// SHA-256 inner round
+/* SHA-256 inner round */
 #define S2Round(a, b, c, d, e, f, g, h, k, w) \
     t1 = h + S1(e) + Ch(e,f,g) + k + (w); \
     t2 = S0(a) + Maj(a,b,c); \
@@ -186,7 +186,7 @@ w[14] += s1(w[12]) + w[7] + s0(w[15]);\
 w[15] += s1(w[13]) + w[8] + s0(w[0]);\
 }
 
-// ROUND
+/* ROUND */
 #define SHA256_RND(k) {\
 S2Round(a, b, c, d, e, f, g, h, K[k], w[0]);\
 S2Round(h, a, b, c, d, e, f, g, K[k + 1], w[1]);\
@@ -231,7 +231,7 @@ __device__ void _SHA256Initialize(uint32_t s[8])
 
 #define DEF(x,y) uint32_t x = output[y]
 
-// Perform SHA-256 transformations, process 64-byte chunks
+/* Perform SHA-256 transformations, process 64-byte chunks */
 __device__ void _SHA256Transform(uint32_t output[8], uint32_t* w)
 {
 
@@ -635,7 +635,7 @@ __device__ void _FindComboStart(int8_t * inputComboGPU, int8_t * combo) {
   }
 }
 
-// ---------------------------------------------------------------------------------
+/* --------------------------------------------------------------------------------- */
 // RIPEMD160
 // ---------------------------------------------------------------------------------
 __device__ __constant__ uint64_t ripemd160_sizedesc_32 = 32 << 3;
@@ -965,7 +965,7 @@ __device__ __noinline__ void _GetHash160P2SHComp(uint64_t* x, uint8_t isOdd, uin
 	uint32_t s[16];
 	_GetHash160Comp(x, isOdd, (uint8_t*)h);
 
-	// P2SH script script
+	/* P2SH script script */
 	scriptBytes[0] = __byte_perm(h[0], 0x14, 0x5401);
 	scriptBytes[1] = __byte_perm(h[0], h[1], 0x2345);
 	scriptBytes[2] = __byte_perm(h[1], h[2], 0x2345);
@@ -1047,7 +1047,7 @@ __device__ __noinline__ void _GetHash160P2SHUncomp(uint64_t* x, uint64_t* y, uin
 
 
 // ---------------------------------------------------------------------------------
-// KECCAK/SHA3
+/* KECCAK/SHA3 */
 // ---------------------------------------------------------------------------------
 
 

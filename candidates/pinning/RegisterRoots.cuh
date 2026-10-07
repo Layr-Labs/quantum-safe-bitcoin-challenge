@@ -80,7 +80,7 @@ __device__ __forceinline__ void qbw_scratch_get(
 template<int N>
 __device__ __forceinline__ void qsb_block_inverse_register_n(uint64_t *value){
     static_assert(N==128 || N==256,"four- or eight-warp shape");
-    // 56 product / 28 inverse rows per warp. Plane padding rotates limb banks.
+    /* 56 product / 28 inverse rows per warp. Plane padding rotates limb banks. */
     __shared__ uint64_t products[4][(N/32)*56+4];
     __shared__ uint64_t inverses[4][(N/32)*28+4];
     const unsigned tid=threadIdx.x,lane=tid&31u,warp=tid>>5;

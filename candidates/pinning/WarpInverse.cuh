@@ -2,7 +2,7 @@
 /* Pinning extension; mathematical model checked, native execution is remote only. */
 /* Derived from the PROMOTED Subset source a137e289b236c3622eba80f1ad5e9a0c8a91eb67. */
 // Preserves i34-9/VanitySearch (Jean Luc Pons), AbdelStark cooperative inverse,
-// ercumentyildirim table divsteps, newjordan and terrapinelf limb/uniform work.
+/* ercumentyildirim table divsteps, newjordan and terrapinelf limb/uniform work. */
 /* Original source comments and full sources are retained alongside this file. */
 /* Include after Pinning qsb_field_mul / qsb_field_normalize and ISO constants. */
 #pragma once
