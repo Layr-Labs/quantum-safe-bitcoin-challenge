@@ -1,3 +1,4 @@
+#define QSB_DRAW_TAG 0xb13ac483u /* inert draw tag */
 #define QSB_DRAW_TAG 0x9b1cd8c5u /* inert draw tag */
 #define QSB_DRAW_TAG 0x93438c22u /* inert draw tag */
 #ifndef QSB_SHA_LEA
@@ -8,7 +9,7 @@
 #endif
 /* l2state variant fkF20c8 + split retry */
 #ifndef QSB_SUB_FINE
-#define QSB_SUB_FINE 1
+#define QSB_SUB_FINE 0 /* dukemawex 960e87fb: sub-batch 65536 -> 131072 (qsb_root_fused<8>); carrier rebuilt with build_carrier.sh 24 */
 #endif
 #if QSB_SUB_FINE
 #define QSB_SUBPIPE 65536
