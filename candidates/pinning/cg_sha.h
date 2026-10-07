@@ -387,6 +387,144 @@ static QSB_SHA_NI void shani_compress2(uint32_t *stA, const uint32_t *wA, uint32
     B0 = _mm_add_epi32(B0, B0s); B1 = _mm_add_epi32(B1, B1s);
     shani_store_state(stA, A0, A1); shani_store_state(stB, B0, B1);
 }
+/* Two full SHA256 compressions per lane. The first block is a co-grinder
+ * suffix: both lanes share midstate and words 4..15. Only the tfast caller
+ * uses this helper. Preserve the full feed-forward before the second hash,
+ * passing its eight words directly through register permutations. */
+static QSB_SHA_NI void shani_double_tail2(uint32_t *stA, const uint32_t *wA,
+                                        uint32_t *stB, const uint32_t *wB,
+                                        const uint32_t *common, const uint32_t *midstate) {
+    __m128i DA0, DA1, DB0, DB1;
+    {
+    __m128i A0, A1, B0, B1;
+    shani_load_state(midstate, A0, A1); B0 = A0; B1 = A1;
+    const __m128i A0s = A0, A1s = A1, B0s = B0, B1s = B1;
+    __m128i MA0, MA1, MA2, MA3, MB0, MB1, MB2, MB3, mA, mB, K;
+    const __m128i common0 = _mm_loadu_si128((const __m128i *)common);
+    MA0 = _mm_blend_epi16(common0, _mm_loadl_epi64((const __m128i *)wA), 0x0F);
+    MB0 = _mm_blend_epi16(common0, _mm_loadl_epi64((const __m128i *)wB), 0x0F);
+    MA1 = _mm_loadu_si128((const __m128i *)(common + 4));  MB1 = MA1;
+    MA2 = _mm_loadu_si128((const __m128i *)(common + 8));  MB2 = MA2;
+    MA3 = _mm_loadu_si128((const __m128i *)(common + 12)); MB3 = MA3;
+    /* group g: rounds 4g..4g+3 on message vector Mc; Mn = next (msg2 target), Mp = previous
+       (alignr source), Mq = the vector msg1 updates */
+#define SHANI2_ROUNDS(g, McA, McB)                                                     \
+    K = _mm_loadu_si128((const __m128i *)(K256 + 4 * (g)));                            \
+    mA = _mm_add_epi32(McA, K); mB = _mm_add_epi32(McB, K);                            \
+    A1 = _mm_sha256rnds2_epu32(A1, A0, mA); B1 = _mm_sha256rnds2_epu32(B1, B0, mB);
+#define SHANI2_TAIL()                                                                  \
+    mA = _mm_shuffle_epi32(mA, 0x0E); mB = _mm_shuffle_epi32(mB, 0x0E);                \
+    A0 = _mm_sha256rnds2_epu32(A0, A1, mA); B0 = _mm_sha256rnds2_epu32(B0, B1, mB);
+#define SHANI2_MSG2(McA, McB, MpA, MpB, MnA, MnB)                                      \
+    MnA = _mm_sha256msg2_epu32(_mm_add_epi32(MnA, _mm_alignr_epi8(McA, MpA, 4)), McA);  \
+    MnB = _mm_sha256msg2_epu32(_mm_add_epi32(MnB, _mm_alignr_epi8(McB, MpB, 4)), McB);
+#define SHANI2_MSG1(MqA, MqB, McA, McB)                                                \
+    MqA = _mm_sha256msg1_epu32(MqA, McA); MqB = _mm_sha256msg1_epu32(MqB, McB);
+#define SHANI2_SHARED_ROUNDS(g, Mc) \
+    K = _mm_loadu_si128((const __m128i *)(K256 + 4 * (g))); \
+    mA = _mm_add_epi32(Mc, K); mB = mA; \
+    A1 = _mm_sha256rnds2_epu32(A1, A0, mA); B1 = _mm_sha256rnds2_epu32(B1, B0, mB);
+#define SHANI2_SHARED_TAIL() \
+    mA = _mm_shuffle_epi32(mA, 0x0E); mB = mA; \
+    A0 = _mm_sha256rnds2_epu32(A0, A1, mA); B0 = _mm_sha256rnds2_epu32(B0, B1, mB);
+#define SHANI2_SHARED_MSG1(MqA, MqB, McA) \
+    MqA = _mm_sha256msg1_epu32(MqA, McA); MqB = MqA;
+    /* g = 0 */  SHANI2_ROUNDS(0, MA0, MB0) SHANI2_TAIL()
+    /* g = 1 */  SHANI2_SHARED_ROUNDS(1, MA1) SHANI2_SHARED_TAIL() SHANI2_MSG1(MA0, MB0, MA1, MB1)
+    /* g = 2 */  SHANI2_SHARED_ROUNDS(2, MA2) SHANI2_SHARED_TAIL() SHANI2_SHARED_MSG1(MA1, MB1, MA2)
+    /* g = 3 */  SHANI2_SHARED_ROUNDS(3, MA3) SHANI2_MSG2(MA3, MB3, MA2, MB2, MA0, MB0) SHANI2_SHARED_TAIL() SHANI2_SHARED_MSG1(MA2, MB2, MA3)
+    /* g = 4 */  SHANI2_ROUNDS(4, MA0, MB0) SHANI2_MSG2(MA0, MB0, MA3, MB3, MA1, MB1) SHANI2_TAIL() SHANI2_MSG1(MA3, MB3, MA0, MB0)
+    /* g = 5 */  SHANI2_ROUNDS(5, MA1, MB1) SHANI2_MSG2(MA1, MB1, MA0, MB0, MA2, MB2) SHANI2_TAIL() SHANI2_MSG1(MA0, MB0, MA1, MB1)
+    /* g = 6 */  SHANI2_ROUNDS(6, MA2, MB2) SHANI2_MSG2(MA2, MB2, MA1, MB1, MA3, MB3) SHANI2_TAIL() SHANI2_MSG1(MA1, MB1, MA2, MB2)
+    /* g = 7 */  SHANI2_ROUNDS(7, MA3, MB3) SHANI2_MSG2(MA3, MB3, MA2, MB2, MA0, MB0) SHANI2_TAIL() SHANI2_MSG1(MA2, MB2, MA3, MB3)
+    /* g = 8 */  SHANI2_ROUNDS(8, MA0, MB0) SHANI2_MSG2(MA0, MB0, MA3, MB3, MA1, MB1) SHANI2_TAIL() SHANI2_MSG1(MA3, MB3, MA0, MB0)
+    /* g = 9 */  SHANI2_ROUNDS(9, MA1, MB1) SHANI2_MSG2(MA1, MB1, MA0, MB0, MA2, MB2) SHANI2_TAIL() SHANI2_MSG1(MA0, MB0, MA1, MB1)
+    /* g = 10 */ SHANI2_ROUNDS(10, MA2, MB2) SHANI2_MSG2(MA2, MB2, MA1, MB1, MA3, MB3) SHANI2_TAIL() SHANI2_MSG1(MA1, MB1, MA2, MB2)
+    /* g = 11 */ SHANI2_ROUNDS(11, MA3, MB3) SHANI2_MSG2(MA3, MB3, MA2, MB2, MA0, MB0) SHANI2_TAIL() SHANI2_MSG1(MA2, MB2, MA3, MB3)
+    /* g = 12 */ SHANI2_ROUNDS(12, MA0, MB0) SHANI2_MSG2(MA0, MB0, MA3, MB3, MA1, MB1) SHANI2_TAIL() SHANI2_MSG1(MA3, MB3, MA0, MB0)
+    /* g = 13 */ SHANI2_ROUNDS(13, MA1, MB1) SHANI2_MSG2(MA1, MB1, MA0, MB0, MA2, MB2) SHANI2_TAIL()
+    /* g = 14 */ SHANI2_ROUNDS(14, MA2, MB2) SHANI2_MSG2(MA2, MB2, MA1, MB1, MA3, MB3) SHANI2_TAIL()
+    /* g = 15 */ SHANI2_ROUNDS(15, MA3, MB3) SHANI2_TAIL()
+#undef SHANI2_SHARED_ROUNDS
+#undef SHANI2_SHARED_TAIL
+#undef SHANI2_SHARED_MSG1
+#undef SHANI2_ROUNDS
+#undef SHANI2_TAIL
+#undef SHANI2_MSG2
+#undef SHANI2_MSG1
+    A0 = _mm_add_epi32(A0, A0s); A1 = _mm_add_epi32(A1, A1s);
+    B0 = _mm_add_epi32(B0, B0s); B1 = _mm_add_epi32(B1, B1s);
+    __m128i tA = _mm_shuffle_epi32(A0, 0x1B);
+    A1 = _mm_shuffle_epi32(A1, 0xB1);
+    DA0 = _mm_blend_epi16(tA, A1, 0xF0);
+    DA1 = _mm_alignr_epi8(A1, tA, 8);
+    __m128i tB = _mm_shuffle_epi32(B0, 0x1B);
+    B1 = _mm_shuffle_epi32(B1, 0xB1);
+    DB0 = _mm_blend_epi16(tB, B1, 0xF0);
+    DB1 = _mm_alignr_epi8(B1, tB, 8);
+    }
+    {
+    __m128i A0, A1, B0, B1;
+    shani_load_state(IV256, A0, A1); B0 = A0; B1 = A1;
+    const __m128i A0s = A0, A1s = A1, B0s = B0, B1s = B1;
+    __m128i MA0 = DA0, MA1 = DA1, MB0 = DB0, MB1 = DB1;
+    __m128i MA2 = _mm_setr_epi32((int)0x80000000u, 0, 0, 0), MB2 = MA2;
+    __m128i MA3 = _mm_setr_epi32(0, 0, 0, 256), MB3 = MA3;
+    __m128i mA, mB, K;
+    /* group g: rounds 4g..4g+3 on message vector Mc; Mn = next (msg2 target), Mp = previous
+       (alignr source), Mq = the vector msg1 updates */
+#define SHANI2_ROUNDS(g, McA, McB)                                                     \
+    K = _mm_loadu_si128((const __m128i *)(K256 + 4 * (g)));                            \
+    mA = _mm_add_epi32(McA, K); mB = _mm_add_epi32(McB, K);                            \
+    A1 = _mm_sha256rnds2_epu32(A1, A0, mA); B1 = _mm_sha256rnds2_epu32(B1, B0, mB);
+#define SHANI2_TAIL()                                                                  \
+    mA = _mm_shuffle_epi32(mA, 0x0E); mB = _mm_shuffle_epi32(mB, 0x0E);                \
+    A0 = _mm_sha256rnds2_epu32(A0, A1, mA); B0 = _mm_sha256rnds2_epu32(B0, B1, mB);
+#define SHANI2_MSG2(McA, McB, MpA, MpB, MnA, MnB)                                      \
+    MnA = _mm_sha256msg2_epu32(_mm_add_epi32(MnA, _mm_alignr_epi8(McA, MpA, 4)), McA);  \
+    MnB = _mm_sha256msg2_epu32(_mm_add_epi32(MnB, _mm_alignr_epi8(McB, MpB, 4)), McB);
+#define SHANI2_MSG1(MqA, MqB, McA, McB)                                                \
+    MqA = _mm_sha256msg1_epu32(MqA, McA); MqB = _mm_sha256msg1_epu32(MqB, McB);
+#define SHANI2_FIXED_ROUNDS(g, c0, c1, c2, c3) \
+    mA = _mm_setr_epi32((int)(K256[4*(g)+0]+(uint32_t)(c0)), (int)(K256[4*(g)+1]+(uint32_t)(c1)), \
+                        (int)(K256[4*(g)+2]+(uint32_t)(c2)), (int)(K256[4*(g)+3]+(uint32_t)(c3))); \
+    mB = mA; \
+    A1 = _mm_sha256rnds2_epu32(A1, A0, mA); B1 = _mm_sha256rnds2_epu32(B1, B0, mB);
+#define SHANI2_FIXED_TAIL() \
+    mA = _mm_shuffle_epi32(mA, 0x0E); mB = mA; \
+    A0 = _mm_sha256rnds2_epu32(A0, A1, mA); B0 = _mm_sha256rnds2_epu32(B0, B1, mB);
+#define SHANI2_ZERO_MSG2(McA, McB, MnA, MnB) \
+    MnA = _mm_sha256msg2_epu32(MnA, McA); \
+    MnB = _mm_sha256msg2_epu32(MnB, McB);
+    /* g = 0 */  SHANI2_ROUNDS(0, MA0, MB0) SHANI2_TAIL()
+    /* g = 1 */  SHANI2_ROUNDS(1, MA1, MB1) SHANI2_TAIL() SHANI2_MSG1(MA0, MB0, MA1, MB1)
+    /* g = 2 */  SHANI2_FIXED_ROUNDS(2, 0x80000000u, 0, 0, 0) SHANI2_FIXED_TAIL() SHANI2_MSG1(MA1, MB1, MA2, MB2)
+    /* g = 3 */  SHANI2_FIXED_ROUNDS(3, 0, 0, 0, 256) SHANI2_ZERO_MSG2(MA3, MB3, MA0, MB0) SHANI2_FIXED_TAIL() SHANI2_MSG1(MA2, MB2, MA3, MB3)
+    /* g = 4 */  SHANI2_ROUNDS(4, MA0, MB0) SHANI2_MSG2(MA0, MB0, MA3, MB3, MA1, MB1) SHANI2_TAIL() SHANI2_MSG1(MA3, MB3, MA0, MB0)
+    /* g = 5 */  SHANI2_ROUNDS(5, MA1, MB1) SHANI2_MSG2(MA1, MB1, MA0, MB0, MA2, MB2) SHANI2_TAIL() SHANI2_MSG1(MA0, MB0, MA1, MB1)
+    /* g = 6 */  SHANI2_ROUNDS(6, MA2, MB2) SHANI2_MSG2(MA2, MB2, MA1, MB1, MA3, MB3) SHANI2_TAIL() SHANI2_MSG1(MA1, MB1, MA2, MB2)
+    /* g = 7 */  SHANI2_ROUNDS(7, MA3, MB3) SHANI2_MSG2(MA3, MB3, MA2, MB2, MA0, MB0) SHANI2_TAIL() SHANI2_MSG1(MA2, MB2, MA3, MB3)
+    /* g = 8 */  SHANI2_ROUNDS(8, MA0, MB0) SHANI2_MSG2(MA0, MB0, MA3, MB3, MA1, MB1) SHANI2_TAIL() SHANI2_MSG1(MA3, MB3, MA0, MB0)
+    /* g = 9 */  SHANI2_ROUNDS(9, MA1, MB1) SHANI2_MSG2(MA1, MB1, MA0, MB0, MA2, MB2) SHANI2_TAIL() SHANI2_MSG1(MA0, MB0, MA1, MB1)
+    /* g = 10 */ SHANI2_ROUNDS(10, MA2, MB2) SHANI2_MSG2(MA2, MB2, MA1, MB1, MA3, MB3) SHANI2_TAIL() SHANI2_MSG1(MA1, MB1, MA2, MB2)
+    /* g = 11 */ SHANI2_ROUNDS(11, MA3, MB3) SHANI2_MSG2(MA3, MB3, MA2, MB2, MA0, MB0) SHANI2_TAIL() SHANI2_MSG1(MA2, MB2, MA3, MB3)
+    /* g = 12 */ SHANI2_ROUNDS(12, MA0, MB0) SHANI2_MSG2(MA0, MB0, MA3, MB3, MA1, MB1) SHANI2_TAIL() SHANI2_MSG1(MA3, MB3, MA0, MB0)
+    /* g = 13 */ SHANI2_ROUNDS(13, MA1, MB1) SHANI2_MSG2(MA1, MB1, MA0, MB0, MA2, MB2) SHANI2_TAIL()
+    /* g = 14 */ SHANI2_ROUNDS(14, MA2, MB2) SHANI2_MSG2(MA2, MB2, MA1, MB1, MA3, MB3) SHANI2_TAIL()
+    /* g = 15 */ SHANI2_ROUNDS(15, MA3, MB3) SHANI2_TAIL()
+#undef SHANI2_FIXED_ROUNDS
+#undef SHANI2_FIXED_TAIL
+#undef SHANI2_ZERO_MSG2
+#undef SHANI2_ROUNDS
+#undef SHANI2_TAIL
+#undef SHANI2_MSG2
+#undef SHANI2_MSG1
+    A0 = _mm_add_epi32(A0, A0s); A1 = _mm_add_epi32(A1, A1s);
+    B0 = _mm_add_epi32(B0, B0s); B1 = _mm_add_epi32(B1, B1s);
+    shani_store_state(stA, A0, A1); shani_store_state(stB, B0, B1);
+    }
+}
+
 
 static QSB_SHA_NI void shani_h0_4(const uint32_t *w0, const uint32_t *w1, const uint32_t *w2,
                                   const uint32_t *w3, uint32_t h0[4]) {

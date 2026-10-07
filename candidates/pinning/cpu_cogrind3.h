@@ -57,7 +57,7 @@ static cpu_set_t g_worker_set; static int g_worker_set_on = 0;
 #endif
 #define QSB_CG_BMAX QSB_CG_B
 #ifndef QSB_CG_PF
-#define QSB_CG_PF 4                       /* table prefetch distance, in 4-candidate blocks */
+#define QSB_CG_PF 2                       /* retained denominator/y cache: prefetch only next table window */
 #endif
 #define QSB_CG_MAXWIN 16
 #define QSB_CG_MAXW 256                   /* max worker threads */
@@ -279,6 +279,8 @@ __attribute__((target("avx2"), noinline))
 static unsigned recode_avx2(worker_t *w, int np) {
     const layout_t &L = g_cg->lay;
     const int k = L.nwin - 1;
+    /* Reuse the existing per-vector zero test; include all prefetch flag padding. */
+    for (int j = 1; j <= k; j++) memset(w->zf[j], 0, (size_t)(np / 4) + 8);
     unsigned zmask = 0;
     const __m256i idx = _mm256_setr_epi32(0, 2, 4, 6, 0, 2, 4, 6);
     const __m256i one = _mm256_set1_epi64x(1), zc = _mm256_set1_epi64x(QCG_ZCODE);
@@ -303,7 +305,7 @@ static unsigned recode_avx2(worker_t *w, int np) {
             carry = _mm256_and_si256(neg, one);
             __m256i code = _mm256_or_si256(_mm256_sub_epi64(m, one), _mm256_slli_epi64(_mm256_and_si256(neg, one), 31));
             const __m256i z = _mm256_cmpeq_epi64(m, _mm256_setzero_si256());
-            if (__builtin_expect(!_mm256_testz_si256(z, z), 0)) { code = _mm256_blendv_epi8(code, zc, z); zmask |= 1u << j; }
+            if (__builtin_expect(!_mm256_testz_si256(z, z), 0)) { code = _mm256_blendv_epi8(code, zc, z); zmask |= 1u << j; w->zf[j][i / 4] = 1; }
             _mm_storeu_si128((__m128i *)&w->dig[j][i], _mm256_castsi256_si128(_mm256_permutevar8x32_epi32(code, idx)));
         }
 #if QSB_CG_HIGHFOLD
@@ -369,28 +371,29 @@ static void z_generic(const worker_t *w, uint32_t seq, uint32_t lt, uint64_t *q)
 }
 
 __attribute__((target("avx2"), noinline))
-static unsigned z_avx2_8(worker_t *w, int i0) {
+static void z_avx2_8_batch(worker_t *w, int begin, int end) {
     using namespace qcg_sha;
     shared_t *S = g_cg;
-    v8u lt = _mm256_add_epi32(_mm256_set1_epi32((int)(w->lt0 + (uint32_t)i0)), _mm256_setr_epi32(0, 1, 2, 3, 4, 5, 6, 7));
-    v8u W[16];
-    for (int k = 0; k < 16; k++) W[k] = _mm256_set1_epi32((int)S->w1_tmpl[k]);
-    for (int b = 0; b < 4; b++) {
-        v8u byte = _mm256_and_si256(_mm256_srli_epi32(lt, 8 * b), _mm256_set1_epi32(0xFF));
-        W[S->lt_word[b]] = _mm256_or_si256(W[S->lt_word[b]], _mm256_sllv_epi32(byte, _mm256_set1_epi32(S->lt_shift[b])));
+    for (int i0 = begin; i0 < end; i0 += 8) {
+        v8u lt = _mm256_add_epi32(_mm256_set1_epi32((int)(w->lt0 + (uint32_t)i0)), _mm256_setr_epi32(0, 1, 2, 3, 4, 5, 6, 7));
+        v8u W[16];
+        for (int k = 0; k < 16; k++) W[k] = _mm256_set1_epi32((int)S->w1_tmpl[k]);
+        for (int b = 0; b < 4; b++) {
+            v8u byte = _mm256_and_si256(_mm256_srli_epi32(lt, 8 * b), _mm256_set1_epi32(0xFF));
+            W[S->lt_word[b]] = _mm256_or_si256(W[S->lt_word[b]], _mm256_sllv_epi32(byte, _mm256_set1_epi32(S->lt_shift[b])));
+        }
+        v8u st[8];
+        if (w->tfast) s8_compress_plan<0x3u, 0>(st, W, w->tplan);      /* block 1 from the sequence midstate */
+        else s8_compress_mid(st, W, w->mid1);
+        s8_compress_plan<0xFFu, 0>(st, st, S8_PLAN_DIGEST);           /* SHA256 of the 32-byte digest */
+        /* zq[k] for lanes: word k (LE 64-bit) = Z[7-2k-1] << 32 | Z[7-2k] (Z0 most significant) */
+        for (int k = 0; k < 4; k++) {
+            const __m256i hi = st[6 - 2 * k], lo = st[7 - 2 * k];
+            const __m256i a = _mm256_unpacklo_epi32(lo, hi), b = _mm256_unpackhi_epi32(lo, hi);   /* lanes 0,1,4,5 | 2,3,6,7 */
+            _mm256_storeu_si256((__m256i *)&w->zq[k][i0], _mm256_permute2x128_si256(a, b, 0x20));
+            _mm256_storeu_si256((__m256i *)&w->zq[k][i0 + 4], _mm256_permute2x128_si256(a, b, 0x31));
+        }
     }
-    v8u st[8];
-    if (w->tfast) s8_compress_plan<0x3u, 0>(st, W, w->tplan);      /* block 1 from the sequence midstate */
-    else s8_compress_mid(st, W, w->mid1);
-    s8_compress_plan<0xFFu, 0>(st, st, S8_PLAN_DIGEST);           /* SHA256 of the 32-byte digest */
-    /* zq[k] for lanes: word k (LE 64-bit) = Z[7-2k-1] << 32 | Z[7-2k] (Z0 most significant) */
-    for (int k = 0; k < 4; k++) {
-        const __m256i hi = st[6 - 2 * k], lo = st[7 - 2 * k];
-        const __m256i a = _mm256_unpacklo_epi32(lo, hi), b = _mm256_unpackhi_epi32(lo, hi);   /* lanes 0,1,4,5 | 2,3,6,7 */
-        _mm256_storeu_si256((__m256i *)&w->zq[k][i0], _mm256_permute2x128_si256(a, b, 0x20));
-        _mm256_storeu_si256((__m256i *)&w->zq[k][i0 + 4], _mm256_permute2x128_si256(a, b, 0x31));
-    }
-    return 0;
 }
 
 #ifndef QSB_CG_SHA_RORX_LANE
@@ -398,57 +401,80 @@ static unsigned z_avx2_8(worker_t *w, int i0) {
 #endif
 #if QSB_CG_SHA_RORX_LANE
 __attribute__((target("avx2,bmi2"), noinline))
-static void z_avx2_9(worker_t *w, int i0) {
+static int z_avx2_9_batch(worker_t *w, int np) {
     using namespace qcg_sha;
     shared_t *S = g_cg;
-    const uint32_t lt0 = w->lt0 + (uint32_t)i0;
-    v8u lt = _mm256_add_epi32(_mm256_set1_epi32((int)lt0), _mm256_setr_epi32(0, 1, 2, 3, 4, 5, 6, 7));
-    v8u W[16];
-    uint32_t SW[16];
-    for (int k = 0; k < 16; k++) { W[k] = _mm256_set1_epi32((int)S->w1_tmpl[k]); SW[k] = S->w1_tmpl[k]; }
-    const uint32_t l9 = lt0 + 8u;
-    for (int b = 0; b < 4; b++) {
-        v8u byte = _mm256_and_si256(_mm256_srli_epi32(lt, 8 * b), _mm256_set1_epi32(0xFF));
-        W[S->lt_word[b]] = _mm256_or_si256(W[S->lt_word[b]], _mm256_sllv_epi32(byte, _mm256_set1_epi32(S->lt_shift[b])));
-        SW[S->lt_word[b]] |= ((l9 >> (8 * b)) & 0xFFu) << S->lt_shift[b];
+    int i0 = 0;
+    for (; i0 + 9 <= np; i0 += 9) {
+        const uint32_t lt0 = w->lt0 + (uint32_t)i0;
+        v8u lt = _mm256_add_epi32(_mm256_set1_epi32((int)lt0), _mm256_setr_epi32(0, 1, 2, 3, 4, 5, 6, 7));
+        v8u W[16];
+        uint32_t SW[16];
+        for (int k = 0; k < 16; k++) { W[k] = _mm256_set1_epi32((int)S->w1_tmpl[k]); SW[k] = S->w1_tmpl[k]; }
+        const uint32_t l9 = lt0 + 8u;
+        for (int b = 0; b < 4; b++) {
+            v8u byte = _mm256_and_si256(_mm256_srli_epi32(lt, 8 * b), _mm256_set1_epi32(0xFF));
+            W[S->lt_word[b]] = _mm256_or_si256(W[S->lt_word[b]], _mm256_sllv_epi32(byte, _mm256_set1_epi32(S->lt_shift[b])));
+            SW[S->lt_word[b]] |= ((l9 >> (8 * b)) & 0xFFu) << S->lt_shift[b];
+        }
+        v8u st[8];
+        uint32_t ss[8];
+        s9_compress_plan<0x3u, 0>(st, W, ss, SW, w->tplan);
+        s9_compress_plan<0xFFu, 0>(st, st, ss, ss, S8_PLAN_DIGEST);
+        for (int k = 0; k < 4; k++) {
+            const __m256i hi = st[6 - 2 * k], lo = st[7 - 2 * k];
+            const __m256i a = _mm256_unpacklo_epi32(lo, hi), b = _mm256_unpackhi_epi32(lo, hi);
+            _mm256_storeu_si256((__m256i *)&w->zq[k][i0], _mm256_permute2x128_si256(a, b, 0x20));
+            _mm256_storeu_si256((__m256i *)&w->zq[k][i0 + 4], _mm256_permute2x128_si256(a, b, 0x31));
+            w->zq[k][i0 + 8] = (uint64_t)ss[6 - 2 * k] << 32 | ss[7 - 2 * k];
+        }
     }
-    v8u st[8];
-    uint32_t ss[8];
-    s9_compress_plan<0x3u, 0>(st, W, ss, SW, w->tplan);
-    s9_compress_plan<0xFFu, 0>(st, st, ss, ss, S8_PLAN_DIGEST);
-    for (int k = 0; k < 4; k++) {
-        const __m256i hi = st[6 - 2 * k], lo = st[7 - 2 * k];
-        const __m256i a = _mm256_unpacklo_epi32(lo, hi), b = _mm256_unpackhi_epi32(lo, hi);
-        _mm256_storeu_si256((__m256i *)&w->zq[k][i0], _mm256_permute2x128_si256(a, b, 0x20));
-        _mm256_storeu_si256((__m256i *)&w->zq[k][i0 + 4], _mm256_permute2x128_si256(a, b, 0x31));
-        w->zq[k][i0 + 8] = (uint64_t)ss[6 - 2 * k] << 32 | ss[7 - 2 * k];
-    }
+    return i0;
 }
 #endif
 
 __attribute__((target("sha,sse4.1"), noinline))
-static unsigned z_shani_2(worker_t *w, int i0) {
+static void z_shani_batch(worker_t *w, int np) {
     using namespace qcg_sha;
     shared_t *S = g_cg;
-    uint32_t WA[16], WB[16];
-    memcpy(WA, S->w1_tmpl, 64); memcpy(WB, S->w1_tmpl, 64);
-    const uint32_t la = w->lt0 + (uint32_t)i0, lb = la + 1;
-    for (int b = 0; b < 4; b++) {
-        WA[S->lt_word[b]] |= ((la >> (8 * b)) & 0xFF) << S->lt_shift[b];
-        WB[S->lt_word[b]] |= ((lb >> (8 * b)) & 0xFF) << S->lt_shift[b];
+    if (w->tfast) {
+        for (int i0 = 0; i0 < np; i0 += 2) {
+            const uint32_t la = w->lt0 + (uint32_t)i0, lb = la + 1;
+            uint32_t sa[8], sb[8];
+                uint32_t WA[2] = {S->w1_tmpl[0], S->w1_tmpl[1]};
+                uint32_t WB[2] = {S->w1_tmpl[0], S->w1_tmpl[1]};
+            for (int b = 0; b < 4; b++) {
+                WA[S->lt_word[b]] |= ((la >> (8 * b)) & 0xFF) << S->lt_shift[b];
+                WB[S->lt_word[b]] |= ((lb >> (8 * b)) & 0xFF) << S->lt_shift[b];
+            }
+                shani_double_tail2(sa, WA, sb, WB, S->w1_tmpl, w->mid1);
+            for (int k = 0; k < 4; k++) {
+                w->zq[k][i0] = (uint64_t)sa[6 - 2 * k] << 32 | sa[7 - 2 * k];
+                w->zq[k][i0 + 1] = (uint64_t)sb[6 - 2 * k] << 32 | sb[7 - 2 * k];
+            }
+        }
+    } else {
+        for (int i0 = 0; i0 < np; i0 += 2) {
+            const uint32_t la = w->lt0 + (uint32_t)i0, lb = la + 1;
+            uint32_t sa[8], sb[8];
+            uint32_t WA[16], WB[16];
+            memcpy(WA, S->w1_tmpl, 64); memcpy(WB, S->w1_tmpl, 64);
+            for (int b = 0; b < 4; b++) {
+                WA[S->lt_word[b]] |= ((la >> (8 * b)) & 0xFF) << S->lt_shift[b];
+                WB[S->lt_word[b]] |= ((lb >> (8 * b)) & 0xFF) << S->lt_shift[b];
+            }
+            memcpy(sa, w->mid1, 32); memcpy(sb, w->mid1, 32);
+            shani_compress2(sa, WA, sb, WB);
+            uint32_t DA[16] = {sa[0], sa[1], sa[2], sa[3], sa[4], sa[5], sa[6], sa[7], 0x80000000u, 0, 0, 0, 0, 0, 0, 256};
+            uint32_t DB[16] = {sb[0], sb[1], sb[2], sb[3], sb[4], sb[5], sb[6], sb[7], 0x80000000u, 0, 0, 0, 0, 0, 0, 256};
+            memcpy(sa, IV256, 32); memcpy(sb, IV256, 32);
+            shani_compress2(sa, DA, sb, DB);
+            for (int k = 0; k < 4; k++) {
+                w->zq[k][i0] = (uint64_t)sa[6 - 2 * k] << 32 | sa[7 - 2 * k];
+                w->zq[k][i0 + 1] = (uint64_t)sb[6 - 2 * k] << 32 | sb[7 - 2 * k];
+            }
+        }
     }
-    uint32_t sa[8], sb[8];
-    memcpy(sa, w->mid1, 32); memcpy(sb, w->mid1, 32);
-    shani_compress2(sa, WA, sb, WB);
-    uint32_t DA[16] = {sa[0], sa[1], sa[2], sa[3], sa[4], sa[5], sa[6], sa[7], 0x80000000u, 0, 0, 0, 0, 0, 0, 256};
-    uint32_t DB[16] = {sb[0], sb[1], sb[2], sb[3], sb[4], sb[5], sb[6], sb[7], 0x80000000u, 0, 0, 0, 0, 0, 0, 256};
-    memcpy(sa, IV256, 32); memcpy(sb, IV256, 32);
-    shani_compress2(sa, DA, sb, DB);
-    for (int k = 0; k < 4; k++) {
-        w->zq[k][i0] = (uint64_t)sa[6 - 2 * k] << 32 | sa[7 - 2 * k];
-        w->zq[k][i0 + 1] = (uint64_t)sb[6 - 2 * k] << 32 | sb[7 - 2 * k];
-    }
-    return 0;
 }
 
 /* pad the digit arrays (prefetch overrun, 4-lane blocks) and set the per-block zero-digit flags;
@@ -456,6 +482,7 @@ static unsigned z_shani_2(worker_t *w, int i0) {
 static void finish_digits(worker_t *w, int np, unsigned zmask) {
     shared_t *S = g_cg;
     for (int j = 0; j < S->lay.nwin; j++) for (int i = np; i < np + 32; i++) w->dig[j][i] = w->dig[j][np - 1];
+    if (S->has_avx2) return; /* AVX2 recoding already produced the identical block flags. */
     const int nb = np / 4;
     for (int j = 1; j < S->lay.nwin; j++) {
         if (!(zmask >> j & 1)) { memset(w->zf[j], 0, (size_t)nb + 8); continue; }
@@ -481,14 +508,14 @@ static int fill_batch(worker_t *w) {
     unsigned zmask = 0;
     const int mode = S->cache_first ? S->sha_mode.load(std::memory_order_relaxed) : 0;
     if (S->cache_first && w->cur_seq_tag != (uint64_t)seq + 1) { seq_midstate(w, seq); w->cur_seq_tag = (uint64_t)seq + 1; }
-    if (mode == 2) { for (int i = 0; i < np; i += 2) z_shani_2(w, i); }
+    if (mode == 2) { z_shani_batch(w, np); }
     else if (mode == 1) {
         int i = 0;
 #if QSB_CG_SHA_RORX_LANE
 
-        if (w->tfast && S->has_adx && S->sha_x9.load(std::memory_order_relaxed)) { for (; i + 9 <= np; i += 9) z_avx2_9(w, i); if (i < np) z_avx2_8(w, np - 8); i = np; }
+        if (w->tfast && S->has_adx && S->sha_x9.load(std::memory_order_relaxed)) { if (np >= 9) i = z_avx2_9_batch(w, np); if (i < np) z_avx2_8_batch(w, np - 8, np); i = np; }
 #endif
-        for (; i < np; i += 8) z_avx2_8(w, i);
+        if (i < np) z_avx2_8_batch(w, i, np);
     }
     else {
         for (int i = 0; i < np; i++) { uint64_t q[4]; z_generic(w, seq, w->lt0 + (uint32_t)i, q); for (int k = 0; k < 4; k++) w->zq[k][i] = q[k]; }
