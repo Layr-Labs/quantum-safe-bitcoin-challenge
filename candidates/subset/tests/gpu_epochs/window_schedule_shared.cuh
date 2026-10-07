@@ -248,6 +248,78 @@ __device__ __noinline__ QSB_CC_RET qsb_pair_const4(QsbPairS16 s) {
     uint32_t fa0=0,fa1=0;
 #endif
     const uint4 *K=reinterpret_cast<const uint4*>(&QSB_CONST_SCHEDULE[0][0]);
+#if QSB_CC_GLUE
+    /* QSB_CC_GLUE (tree.cu): the four blocks in one rolled loop; each block's first rounds are peeled and read the saved
+     * state s.w directly, so the working registers start from those rounds' results (no working-state copies, no
+     * per-block loop resets); the inner loop runs the remaining rounds. Same words, rounds and order as the base. */
+#define QSB_CCG_R8(KA,KB) do{ const uint4 ka=(KA), kb=(KB); \
+    {const uint32_t w=(ka).x;S2Round(a0,b0,c0,d0,e0,f0,g0,h0,0,w);S2Round(a1,b1,c1,d1,e1,f1,g1,h1,0,w);} \
+    {const uint32_t w=(ka).y;S2Round(h0,a0,b0,c0,d0,e0,f0,g0,0,w);S2Round(h1,a1,b1,c1,d1,e1,f1,g1,0,w);} \
+    {const uint32_t w=(ka).z;S2Round(g0,h0,a0,b0,c0,d0,e0,f0,0,w);S2Round(g1,h1,a1,b1,c1,d1,e1,f1,0,w);} \
+    {const uint32_t w=(ka).w;S2Round(f0,g0,h0,a0,b0,c0,d0,e0,0,w);S2Round(f1,g1,h1,a1,b1,c1,d1,e1,0,w);} \
+    {const uint32_t w=(kb).x;S2Round(e0,f0,g0,h0,a0,b0,c0,d0,0,w);S2Round(e1,f1,g1,h1,a1,b1,c1,d1,0,w);} \
+    {const uint32_t w=(kb).y;S2Round(d0,e0,f0,g0,h0,a0,b0,c0,0,w);S2Round(d1,e1,f1,g1,h1,a1,b1,c1,0,w);} \
+    {const uint32_t w=(kb).z;S2Round(c0,d0,e0,f0,g0,h0,a0,b0,0,w);S2Round(c1,d1,e1,f1,g1,h1,a1,b1,0,w);} \
+    {const uint32_t w=(kb).w;S2Round(b0,c0,d0,e0,f0,g0,h0,a0,0,w);S2Round(b1,c1,d1,e1,f1,g1,h1,a1,0,w);} \
+}while(0)
+    const uint4 *kr=K;   /* the row pointer is the only address induction: it runs on across the four blocks */
+#if QSB_SX_CC_FLAT
+    /* QSB_SX_CC_FLAT (tree.cu): the QSB_CC_GLUE 1 block body with its three 16-round trips written out, so each block is one
+     * straight 64-round body (rounds 0..15 still read the saved state s.w) and only the block loop remains. The same rows
+     * (kr[0..15] of the block), rounds and order as the QSB_CC_GLUE 1 loop below. */
+    #pragma unroll 1
+    for(int block=0;block<4;block++){
+        a0=s.w[0];b0=s.w[1];c0=s.w[2];d0=s.w[3];e0=s.w[4];f0=s.w[5];g0=s.w[6];h0=s.w[7];
+        a1=s.w[8];b1=s.w[9];c1=s.w[10];d1=s.w[11];e1=s.w[12];f1=s.w[13];g1=s.w[14];h1=s.w[15];
+        QSB_CCG_R8(kr[0],kr[1]);   QSB_CCG_R8(kr[2],kr[3]);
+        QSB_CCG_R8(kr[4],kr[5]);   QSB_CCG_R8(kr[6],kr[7]);
+        QSB_CCG_R8(kr[8],kr[9]);   QSB_CCG_R8(kr[10],kr[11]);
+        QSB_CCG_R8(kr[12],kr[13]); QSB_CCG_R8(kr[14],kr[15]);
+        kr+=16;
+        s.w[0]+=a0;s.w[1]+=b0;s.w[2]+=c0;s.w[3]+=d0;s.w[4]+=e0;s.w[5]+=f0;s.w[6]+=g0;s.w[7]+=h0;
+        s.w[8]+=a1;s.w[9]+=b1;s.w[10]+=c1;s.w[11]+=d1;s.w[12]+=e1;s.w[13]+=f1;s.w[14]+=g1;s.w[15]+=h1;
+    }
+    if(0)   /* QSB_SX_CC_FLAT: the base loop below stays in the source as dead code */
+#endif
+    #pragma unroll 1
+    for(int block=0;block<4;block++){
+        a0=s.w[0];b0=s.w[1];c0=s.w[2];d0=s.w[3];e0=s.w[4];f0=s.w[5];g0=s.w[6];h0=s.w[7];
+        a1=s.w[8];b1=s.w[9];c1=s.w[10];d1=s.w[11];e1=s.w[12];f1=s.w[13];g1=s.w[14];h1=s.w[15];
+#if QSB_CC_GLUE == 1
+        /* rounds 0..15 peeled, rounds 16..63 as three 16-round trips */
+        QSB_CCG_R8(kr[0],kr[1]);
+        QSB_CCG_R8(kr[2],kr[3]);
+        kr+=4;
+        #pragma unroll 1
+        for(int q=4;q<16;q+=4){
+            QSB_CCG_R8(kr[0],kr[1]);
+            QSB_CCG_R8(kr[2],kr[3]);
+            kr+=4;
+        }
+#elif QSB_CC_GLUE == 2
+        /* rounds 0..7 peeled, rounds 8..63 as seven 8-round trips */
+        QSB_CCG_R8(kr[0],kr[1]);
+        kr+=2;
+        #pragma unroll 1
+        for(int q=2;q<16;q+=2){
+            QSB_CCG_R8(kr[0],kr[1]);
+            kr+=2;
+        }
+#else
+        /* no peel: four 16-round trips (the working-state copies stay) */
+        #pragma unroll 1
+        for(int q=0;q<16;q+=4){
+            QSB_CCG_R8(kr[0],kr[1]);
+            QSB_CCG_R8(kr[2],kr[3]);
+            kr+=4;
+        }
+#endif
+        s.w[0]+=a0;s.w[1]+=b0;s.w[2]+=c0;s.w[3]+=d0;s.w[4]+=e0;s.w[5]+=f0;s.w[6]+=g0;s.w[7]+=h0;
+        s.w[8]+=a1;s.w[9]+=b1;s.w[10]+=c1;s.w[11]+=d1;s.w[12]+=e1;s.w[13]+=f1;s.w[14]+=g1;s.w[15]+=h1;
+    }
+#undef QSB_CCG_R8
+    return s;
+#else
     #pragma unroll
     for(int block=0;block<4;block++){
         a0=s.w[0];b0=s.w[1];c0=s.w[2];d0=s.w[3];e0=s.w[4];f0=s.w[5];g0=s.w[6];h0=s.w[7];
@@ -313,6 +385,7 @@ __device__ __noinline__ QSB_CC_RET qsb_pair_const4(QsbPairS16 s) {
 #else
     return s;
 #endif
+#endif   /* QSB_CC_GLUE */
 }
 #endif
 /* Paired epoch SHA from dukemawex 4cea5476 (origin e771d5c7 / e9812a9). The paired consumer has the same lane (and therefore the same scheduled
@@ -384,6 +457,64 @@ __device__ __forceinline__ void qsb_scheduled_window_hash_pair(
      * after rounds r..r+3 have consumed wa, so each load leads its first use by four rounds, as in the unrolled
      * form. The pointer walks the rows; the last trip's extra wa load reads padding row 16 (discarded). Same
      * words, same rounds, same order. */
+#if QSB_C3_SHA_WIN
+    /* ==== cut3 R2 QSB_C3_SHA_WIN (tree.cu): the same 8-round trip body; the row pointer pp is one 64-bit register stepped
+     * in place in inline PTX, the rows read with ld.global.v4.u32 at immediate offsets, the loop ends on pp's low word.
+     * 1 / 3: the first 1 / 2 trips peeled with their rows at immediate offsets from the start pointer; the loop's pointer
+     * then lags the peel (its rows at +2P+1 and, after the step, +2P rows), so the peel needs no pointer step. ==== */
+#define QSB_C3W_R4A(W) do{ \
+    {const uint32_t w=(W).x;S2Round(a0,b0,c0,d0,e0,f0,g0,h0,0,w);S2Round(a1,b1,c1,d1,e1,f1,g1,h1,0,w);} \
+    {const uint32_t w=(W).y;S2Round(h0,a0,b0,c0,d0,e0,f0,g0,0,w);S2Round(h1,a1,b1,c1,d1,e1,f1,g1,0,w);} \
+    {const uint32_t w=(W).z;S2Round(g0,h0,a0,b0,c0,d0,e0,f0,0,w);S2Round(g1,h1,a1,b1,c1,d1,e1,f1,0,w);} \
+    {const uint32_t w=(W).w;S2Round(f0,g0,h0,a0,b0,c0,d0,e0,0,w);S2Round(f1,g1,h1,a1,b1,c1,d1,e1,0,w);} }while(0)
+#define QSB_C3W_R4B(W) do{ \
+    {const uint32_t w=(W).x;S2Round(e0,f0,g0,h0,a0,b0,c0,d0,0,w);S2Round(e1,f1,g1,h1,a1,b1,c1,d1,0,w);} \
+    {const uint32_t w=(W).y;S2Round(d0,e0,f0,g0,h0,a0,b0,c0,0,w);S2Round(d1,e1,f1,g1,h1,a1,b1,c1,0,w);} \
+    {const uint32_t w=(W).z;S2Round(c0,d0,e0,f0,g0,h0,a0,b0,0,w);S2Round(c1,d1,e1,f1,g1,h1,a1,b1,0,w);} \
+    {const uint32_t w=(W).w;S2Round(b0,c0,d0,e0,f0,g0,h0,a0,0,w);S2Round(b1,c1,d1,e1,f1,g1,h1,a1,0,w);} }while(0)
+/* row load ROWS rows (ROWS x QSB_SE_PER_EPOCH x 16 B) past pp; pp += 2 rows */
+#define QSB_C3W_LD(D, ROWS) asm("ld.global.v4.u32 {%0,%1,%2,%3}, [%4+%5];" \
+        : "=r"((D).x), "=r"((D).y), "=r"((D).z), "=r"((D).w) : "l"(pp), "n"((ROWS)*QSB_SE_PER_EPOCH*16))
+#define QSB_C3W_STEP() asm("{\n\t.reg .u32 lo, hi;\n\tmov.b64 {lo,hi}, %0;\n\tadd.cc.u32 lo, lo, %1;\n\taddc.u32 hi, hi, 0;\n\tmov.b64 %0, {lo,hi};\n\t}" \
+        : "+l"(pp) : "n"(2*QSB_SE_PER_EPOCH*16))
+/* a peeled trip on rows 2T (wa, loaded) and 2T+1, issuing row 2T+2 after its first 4 rounds; no step */
+#define QSB_C3W_PEEL(T) do{ uint4 wb; QSB_C3W_LD(wb, 2*(T)+1); QSB_C3W_R4A(wa); QSB_C3W_LD(wa, 2*(T)+2); QSB_C3W_R4B(wb); }while(0)
+#if QSB_C3_SHA_WIN == 1
+#define QSB_C3W_P 1
+#elif QSB_C3_SHA_WIN == 3
+#define QSB_C3W_P 2
+#else
+#define QSB_C3W_P 0
+#endif
+    {
+        uint64_t pp;
+        asm("cvta.to.global.u64 %0, %1;" : "=l"(pp) : "l"(&QSB_WINDOW_SECOND[0][slot]));   /* global-space address */
+        uint4 wa;
+        QSB_C3W_LD(wa, 0);
+        uint32_t wend, wlo;
+        asm("{\n\t.reg .u32 hi;\n\tmov.b64 {%0,hi}, %1;\n\t}" : "=r"(wend) : "l"(pp));
+        /* the walk ends when the lagging pointer, plus its 2P rows of lag, reaches padding row 16 */
+        wend+=(16u-2u*QSB_C3W_P)*QSB_SE_PER_EPOCH*16u;
+#if QSB_C3W_P >= 1
+        QSB_C3W_PEEL(0);                  /* rounds 0..7 */
+#endif
+#if QSB_C3W_P >= 2
+        QSB_C3W_PEEL(1);                  /* rounds 8..15 */
+#endif
+        #pragma unroll 1
+        do{   /* trip: rows 2P+2t and 2P+2t+1 relative to the lagging pointer's trip t */
+            uint4 wb; QSB_C3W_LD(wb, 2*QSB_C3W_P+1); QSB_C3W_R4A(wa);
+            QSB_C3W_STEP(); QSB_C3W_LD(wa, 2*QSB_C3W_P); QSB_C3W_R4B(wb);
+            asm("{\n\t.reg .u32 hi;\n\tmov.b64 {%0,hi}, %1;\n\t}" : "=r"(wlo) : "l"(pp));
+        }while(wlo!=wend);
+    }
+#undef QSB_C3W_P
+#undef QSB_C3W_PEEL
+#undef QSB_C3W_STEP
+#undef QSB_C3W_LD
+#undef QSB_C3W_R4B
+#undef QSB_C3W_R4A
+#else   /* QSB_C3_SHA_WIN */
     {
         const uint4 *wp=&QSB_WINDOW_SECOND[0][slot];
         uint4 wa=wp[0];
@@ -401,6 +532,7 @@ __device__ __forceinline__ void qsb_scheduled_window_hash_pair(
             {const uint32_t w=wb.w;S2Round(b0,c0,d0,e0,f0,g0,h0,a0,0,w);S2Round(b1,c1,d1,e1,f1,g1,h1,a1,0,w);}
         }
     }
+#endif   /* QSB_C3_SHA_WIN */
     if(0)   /* the rolled loop replaces the loop below, which stays in the source as dead code (this form is the
              * measured one; an #else form reorders two moves) */
 #endif
