@@ -6,12 +6,26 @@
 #include "PrefixCyclicField.cuh"
 static_assert(QSB_RF_LANES==128 && QSB_SUBPIPE<=131072 && QSB_SUBPIPE%QSB_TREE_N==0,
               "register roots take at most 1024 roots per sub-batch (128-lane shape)");
+#ifndef QSB_RROOT_V2_IO
+#define QSB_RROOT_V2_IO 1
+#endif
+#if QSB_RROOT_V2_IO != 0 && QSB_RROOT_V2_IO != 1
+#error "QSB_RROOT_V2_IO must be 0 or 1"
+#endif
+/* Same 32-byte root records as the finish kernel's QSB_ROOT_V2 path:
+ * cudaMalloc base alignment and 32-byte row stride align both v2 accesses. */
 __device__ __forceinline__ bool qbw_root_load(
     uint64_t x[5],const uint64_t *roots,unsigned i,unsigned count) {
     x[0]=1;x[1]=x[2]=x[3]=x[4]=0;
     if(i>=count)return false;
+#if QSB_RROOT_V2_IO
+    const ulonglong2 *r2=(const ulonglong2 *)roots;
+    const ulonglong2 a01=r2[2ull*i],a23=r2[2ull*i+1];
+    x[0]=a01.x;x[1]=a01.y;x[2]=a23.x;x[3]=a23.y;
+#else
     #pragma unroll
     for(int k=0;k<4;++k)x[k]=roots[(size_t)i*4u+k];
+#endif
     qsb_field_normalize(x);
     const bool nz=(x[0]|x[1]|x[2]|x[3])!=0;
     if(!nz)x[0]=1;
@@ -22,8 +36,14 @@ __device__ __forceinline__ void qbw_root_store(
     if(i>=count)return;
     qsb_field_normalize(x);
     if(!nonzero)x[0]=x[1]=x[2]=x[3]=0;
+#if QSB_RROOT_V2_IO
+    ulonglong2 *r2=(ulonglong2 *)roots;
+    r2[2ull*i]=make_ulonglong2(x[0],x[1]);
+    r2[2ull*i+1]=make_ulonglong2(x[2],x[3]);
+#else
     #pragma unroll
     for(int k=0;k<4;++k)roots[(size_t)i*4u+k]=x[k];
+#endif
     uint64_t b[5]={
 #if QSB_ISO_XR
         pin_iso_u2ry_words[0],pin_iso_u2ry_words[1],
@@ -37,8 +57,14 @@ __device__ __forceinline__ void qbw_root_store(
     _ModAdd256(b,b,b);
 #endif
     uint64_t weighted[5];qsb_field_mul(weighted,x,b);
+#if QSB_RROOT_V2_IO
+    const size_t row=(size_t)count+i;
+    r2[2ull*row]=make_ulonglong2(weighted[0],weighted[1]);
+    r2[2ull*row+1]=make_ulonglong2(weighted[2],weighted[3]);
+#else
     #pragma unroll
     for(int k=0;k<4;++k)roots[((size_t)count+i)*4u+k]=weighted[k];
+#endif
 }
 
 __device__ __forceinline__ void qbw_scratch_put(
@@ -234,27 +260,47 @@ __global__ void __launch_bounds__(256,1) qsb_root_register(uint64_t *roots,int c
 }
 #elif QSB_RROOT_ONEQ_ON
 
+#ifndef QSB_RROOT_KEEP_PAIRS
+#define QSB_RROOT_KEEP_PAIRS 1
+#endif
+#if QSB_RROOT_KEEP_PAIRS != 0 && QSB_RROOT_KEEP_PAIRS != 1
+#error "QSB_RROOT_KEEP_PAIRS must be 0 or 1"
+#endif
+/* Keep only the two quartet pair products across inversion. The input roots
+ * and nonzero flags retain their original short lifetime and reload path. */
+
 __global__ void __launch_bounds__(128,1) qsb_root_register(uint64_t *roots,int count) {
     if (count<=0 || count>QSB_RROOT_CAP) return;
     const unsigned n=(unsigned)count;
     const unsigned lane=threadIdx.x;
     uint64_t total[5];
+#if QSB_RROOT_KEEP_PAIRS
+    uint64_t p01[5],p23[5];
+#endif
     {
-        uint64_t p01[5],p23[5],a[5],b[5];
+#if !QSB_RROOT_KEEP_PAIRS
+        uint64_t p01[5],p23[5];
+#endif
+        uint64_t a[5],b[5];
         qbw_root_load(a,roots,lane,n);
         qbw_root_load(b,roots,lane+128u,n);
         qsb_field_mul(p01,a,b);p01[4]=0;
         qbw_root_load(a,roots,lane+256u,n);
         qbw_root_load(b,roots,lane+384u,n);
         qsb_field_mul(p23,a,b);p23[4]=0;
+#if !QSB_RROOT_KEEP_PAIRS
         qbw_scratch_put(roots,n,lane+256u,p01);
         qbw_scratch_put(roots,n,lane+384u,p23);
+#endif
         qsb_field_mul(total,p01,p23);total[4]=0;
     }
     qsb_block_inverse_register_n<128>(total);
-    uint64_t p01[5],p23[5],ip01[5],ip23[5];
+    uint64_t ip01[5],ip23[5];
+#if !QSB_RROOT_KEEP_PAIRS
+    uint64_t p01[5],p23[5];
     qbw_scratch_get(p01,roots,n,lane+256u);
     qbw_scratch_get(p23,roots,n,lane+384u);
+#endif
     qsb_field_mul(ip01,total,p23);ip01[4]=0;
     qsb_field_mul(ip23,total,p01);ip23[4]=0;
     #pragma unroll

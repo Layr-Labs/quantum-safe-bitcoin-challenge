@@ -12,6 +12,12 @@
 #ifndef QSB_PARITY_WINDOW_NARROW
 #define QSB_PARITY_WINDOW_NARROW 1
 #endif
+#ifndef QSB_PARITY_D6_SPLIT
+#define QSB_PARITY_D6_SPLIT 1
+#endif
+#if QSB_PARITY_D6_SPLIT != 0 && QSB_PARITY_D6_SPLIT != 1
+#error "QSB_PARITY_D6_SPLIT must be 0 or 1"
+#endif
 /* QSB_FIN_BAL2 bit 1: the narrow window's two carry accumulators start from the constant-bank
  * zero pin_zero_add instead of the literal 0. top = 0 + carry is the same value, but ptxas then
  * emits the first capture as IMAD.X (multiply pipe) instead of SEL. */
@@ -33,6 +39,10 @@ __device__ __forceinline__ void qsb_parity_window_words(
         ".reg .u32 a0,a1,a2,a3,a4,a5,a6,a7,b0,b1,b2,b3,b4,b5,b6,b7;\n"
         ".reg .u32 pcarry,lo,hi,top,mid0,mid1,bit;\n"
         ".reg .u64 acc,t,mid,high;\n"
+#if QSB_PARITY_WINDOW_NARROW && QSB_PARITY_D6_SPLIT
+        ".reg .u64 acc2;\n"
+        ".reg .u32 top2;\n"
+#endif
         "mov.b64 {a0,a1}, %2;\n"
         "mov.b64 {a2,a3}, %3;\n"
         "mov.b64 {a4,a5}, %4;\n"
@@ -41,7 +51,31 @@ __device__ __forceinline__ void qsb_parity_window_words(
         "mov.b64 {b2,b3}, %7;\n"
         "mov.b64 {b4,b5}, %8;\n"
         "mov.b64 {b6,b7}, %9;\n"
-#if QSB_PARITY_WINDOW_NARROW
+#if QSB_PARITY_WINDOW_NARROW && QSB_PARITY_D6_SPLIT
+        /* D6 is a 96-bit sum. Accumulate 4+3 products independently, then
+         * merge low words and their carries; downstream mid/top are identical. */
+        "mul.wide.u32 acc,a0,b6;\n"
+        QSB_PW_TOP0
+        "mul.wide.u32 acc2,a4,b2;\n"
+        "mov.u32 top2,top;\n"
+        "mul.wide.u32 t,a1,b5;\n"
+        "add.cc.u64 acc,acc,t;\n"
+        "addc.u32 top,top,0;\n"
+        "mul.wide.u32 t,a5,b1;\n"
+        "add.cc.u64 acc2,acc2,t;\n"
+        "addc.u32 top2,top2,0;\n"
+        "mul.wide.u32 t,a2,b4;\n"
+        "add.cc.u64 acc,acc,t;\n"
+        "addc.u32 top,top,0;\n"
+        "mul.wide.u32 t,a6,b0;\n"
+        "add.cc.u64 acc2,acc2,t;\n"
+        "addc.u32 top2,top2,0;\n"
+        "mul.wide.u32 t,a3,b3;\n"
+        "add.cc.u64 acc,acc,t;\n"
+        "addc.u32 top,top,0;\n"
+        "add.cc.u64 acc,acc,acc2;\n"
+        "addc.u32 top,top,top2;\n"
+#elif QSB_PARITY_WINDOW_NARROW
         "mul.wide.u32 acc,a0,b6;\n"
         QSB_PW_TOP0
 #else
@@ -69,6 +103,7 @@ __device__ __forceinline__ void qsb_parity_window_words(
         "add.cc.u64 acc,acc,t;\n"
         "addc.u32 top,top,0;\n"
 #endif
+#if !(QSB_PARITY_WINDOW_NARROW && QSB_PARITY_D6_SPLIT)
         "mul.wide.u32 t,a1,b5;\n"
         "add.cc.u64 acc,acc,t;\n"
         "addc.u32 top,top,0;\n"
@@ -87,6 +122,7 @@ __device__ __forceinline__ void qsb_parity_window_words(
         "mul.wide.u32 t,a6,b0;\n"
         "add.cc.u64 acc,acc,t;\n"
         "addc.u32 top,top,0;\n"
+#endif
         "mov.b64 {lo,hi},acc;\n"
         "mov.b64 mid,{hi,top};\n"
         "mul.wide.u32 t,a0,b7;\n"
