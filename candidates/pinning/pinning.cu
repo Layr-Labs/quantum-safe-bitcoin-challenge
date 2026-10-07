@@ -8,7 +8,7 @@
 #endif
 /* l2state variant fkF20c8 + split retry */
 #ifndef QSB_SUB_FINE
-#define QSB_SUB_FINE 1
+#define QSB_SUB_FINE 0 /* native 131072-candidate sub-batches with the matching fused K8 carrier */
 #endif
 #if QSB_SUB_FINE
 #define QSB_SUBPIPE 65536
@@ -7448,18 +7448,20 @@ int main(int argc, char **argv) {
 #endif
     /* QSB_ASICBOOST: each host batch covers the group's QSB_SEQ_GROUP sequences seq + k*stride at
      * the same locktimes, so the group still enumerates this GPU's sequences in order. */
+    uint8_t seq_block[64];
+    memcpy(seq_block, pp.suffix, sizeof(seq_block));
     for (uint32_t seq = SEQ_MIN + effective_id; ; seq += QSB_SEQ_GROUP * (uint32_t)effective_total) {
         qsb_tail_pre grp_tp[QSB_SEQ_GROUP];
         for (int k = 0; k < QSB_SEQ_GROUP; k++) {
             const uint32_t sk = seq + (uint32_t)k * (uint32_t)effective_total;
             if (fast_tail) {
-                uint8_t block[64];
-                memcpy(block, pp.suffix, sizeof(block));
-                for(int i=0;i<4;i++) block[pp.seq_offset+i]=(uint8_t)(sk>>(8*i));
+                /* SHA256_Transform does not modify its input.  The ranked
+                 * block differs between sequences only in these four bytes. */
+                for(int i=0;i<4;i++) seq_block[pp.seq_offset+i]=(uint8_t)(sk>>(8*i));
                 SHA256_CTX ctx;
                 SHA256_Init(&ctx);
                 for(int i=0;i<8;i++) ctx.h[i]=pp.midstate[i];
-                SHA256_Transform(&ctx,block);
+                SHA256_Transform(&ctx,seq_block);
                 for(int i=0;i<8;i++) cur_mid[i]=ctx.h[i];
             } else {
                 for(int i=0;i<8;i++) cur_mid[i]=pp.midstate[i];
@@ -7668,7 +7670,7 @@ int main(int argc, char **argv) {
 #endif
 
             /* Check if another GPU found it */
-            if ((total_searched % (50*1024*1024)) < (uint64_t)BATCH) {
+            if (num_gpus > 1 && (total_searched % (50*1024*1024)) < (uint64_t)BATCH) {
                 char check[256];
                 for (int g = 0; g < num_gpus; g++) {
                     if (g == gpu_index) continue;
@@ -7811,7 +7813,7 @@ int main(int argc, char **argv) {
             }
 
             /* Check if another GPU found it */
-            if ((total_searched % (50*1024*1024)) < (uint64_t)BATCH) {
+            if (num_gpus > 1 && (total_searched % (50*1024*1024)) < (uint64_t)BATCH) {
                 char check[256];
                 for (int g = 0; g < num_gpus; g++) {
                     if (g == gpu_index) continue;
