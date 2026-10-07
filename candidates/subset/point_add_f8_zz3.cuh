@@ -119,6 +119,16 @@
         "\t.reg .u32 f8_z0,f8_z1,f8_z2,f8_z3,f8_z4,f8_z5,f8_z6,f8_z7,f8_z8,f8_w0,f8_w1,f8_w2,f8_w3,f8_w4,f8_w5,f8_w6,f8_w7,f8_m2;\n"
         "\tmov.b64 f8_r0, {f8_x0,f8_x1}; mov.b64 f8_r1, {f8_x2,f8_x3}; mov.b64 f8_r2, {f8_x4,f8_x5}; mov.b64 f8_r3, {f8_x6,f8_x7};\n"
         "\tmov.b64 f8_h0, {f8_x8,f8_x9}; mov.b64 f8_h1, {f8_x10,f8_x11}; mov.b64 f8_h2, {f8_x12,f8_x13}; mov.b64 f8_h3, {f8_x14,f8_x15};\n"
+#if QSB_FOLD_FFIRST & 64
+        "\tmul.wide.u32 f8_t, " QSB_FKM("f8_x9") ";  add.cc.u64  f8_g0, f8_h0, f8_t;\n"
+        "\tmul.wide.u32 f8_t, " QSB_FKM("f8_x11") "; addc.cc.u64 f8_g1, f8_h1, f8_t;\n"
+        "\tmul.wide.u32 f8_t, " QSB_FKM("f8_x13") "; addc.cc.u64 f8_g2, f8_h2, f8_t;\n"
+        "\tmul.wide.u32 f8_t, " QSB_FKM("f8_x15") "; addc.u64 f8_g3, f8_h3, f8_t;\n"
+        "\tmul.wide.u32 f8_t, " QSB_FKM("f8_x8") ";  add.cc.u64  f8_f0, f8_r0, f8_t;\n"
+        "\tmul.wide.u32 f8_t, " QSB_FKM("f8_x10") "; addc.cc.u64 f8_f1, f8_r1, f8_t;\n"
+        "\tmul.wide.u32 f8_t, " QSB_FKM("f8_x12") "; addc.cc.u64 f8_f2, f8_r2, f8_t;\n"
+        "\tmul.wide.u32 f8_t, " QSB_FKM("f8_x14") "; addc.u64 f8_f3, f8_r3, f8_t;\n"
+#else
         "\tmul.wide.u32 f8_t, " QSB_FKM("f8_x8") ";  add.cc.u64  f8_f0, f8_r0, f8_t;\n"
         "\tmul.wide.u32 f8_t, " QSB_FKM("f8_x10") "; addc.cc.u64 f8_f1, f8_r1, f8_t;\n"
         "\tmul.wide.u32 f8_t, " QSB_FKM("f8_x12") "; addc.cc.u64 f8_f2, f8_r2, f8_t;\n"
@@ -127,6 +137,7 @@
         "\tmul.wide.u32 f8_t, " QSB_FKM("f8_x11") "; addc.cc.u64 f8_g1, f8_h1, f8_t;\n"
         "\tmul.wide.u32 f8_t, " QSB_FKM("f8_x13") "; addc.cc.u64 f8_g2, f8_h2, f8_t;\n"
         "\tmul.wide.u32 f8_t, " QSB_FKM("f8_x15") "; addc.u64 f8_g3, f8_h3, f8_t;\n"
+#endif
         "\tmov.b64 {f8_w0,f8_w1}, f8_g0; mov.b64 {f8_w2,f8_w3}, f8_g1; mov.b64 {f8_w4,f8_w5}, f8_g2; mov.b64 {f8_w6,f8_w7}, f8_g3;\n"
         "\tmov.u32 f8_z8, f8_w7;\n"
         "\tmov.b64 {f8_z0,f8_z1}, f8_f0; mov.b64 {f8_z2,f8_z3}, f8_f1; mov.b64 {f8_z4,f8_z5}, f8_f2; mov.b64 {f8_z6,f8_z7}, f8_f3;\n"
