@@ -531,6 +531,15 @@ QSB_RL_F(b, c, d, e, f, g, h, a, QSB_KWF(qsb_klit(k + 15), w[15]));\
 #ifndef QSB_FIN_R63_LEA
 #define QSB_FIN_R63_LEA 1
 #endif
+
+/* Candidate 077: keep the final W63 schedule result out of the two rotate-add
+ * dependencies. The same seven addends are summed modulo 2^32. */
+#ifndef QSB_FIN_W63_LATE
+#define QSB_FIN_W63_LATE 1
+#endif
+#if QSB_FIN_W63_LATE != 0 && QSB_FIN_W63_LATE != 1
+#error "QSB_FIN_W63_LATE must be 0 or 1"
+#endif
 /* QSB_FIN_W8S0 (kill switch): s0 of the padded last message word W8 = (b << 24) | 0x800000
  * (b = the low byte of x) from its 8 live bits; see the W23 step of _SHA256Pubkey33H0. */
 #ifndef QSB_FIN_W8S0
@@ -696,9 +705,15 @@ __device__ __forceinline__ uint32_t _SHA256Pubkey33H0(const uint32_t m[9])
         w[15] = qsb_fadd(w[15], one, w[8]);
         w[15] = qsb_fadd(w[15], one, s0(w[0]));
 #if QSB_FIN_R63_SUM && QSB_FIN_R63_LEA && QSB_FIN_LEA
+#if QSB_FIN_W63_LATE
+        const uint32_t r0 = a + Ch(f,g,h) + Maj(b,c,d);
+        const uint32_t r1 = qsb_add_ror2(qsb_add_ror6(r0, QSB_S1P(f)), QSB_S0P(b));
+        return r1 + w[15] + (qsb_klit(63) + QSB_IV0);
+#else
         const uint32_t r0 = a + w[15] + (qsb_klit(63) + QSB_IV0);
         const uint32_t r1 = r0 + Ch(f,g,h) + Maj(b,c,d);
         return qsb_add_ror2(qsb_add_ror6(r1, QSB_S1P(f)), QSB_S0P(b));
+#endif
 #elif QSB_FIN_R63_SUM
         const uint32_t r0 = a + w[15] + (qsb_klit(63) + QSB_IV0);
         const uint32_t r1 = r0 + S1(f) + Ch(f,g,h);
