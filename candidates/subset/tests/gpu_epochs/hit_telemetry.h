@@ -36,6 +36,10 @@
 #include <thread>
 #include <vector>
 #include <algorithm>
+#include <cpuid.h>
+#include <stdio.h>
+#include <unistd.h>
+#include <glob.h>
 
 namespace qtel {
 
@@ -99,6 +103,9 @@ struct Nvml {
     int (*reasons)(nvmlDevice_t, unsigned long long *) = nullptr;
     int (*limit)(nvmlDevice_t, unsigned *) = nullptr;
     int (*fields)(nvmlDevice_t, int, nvmlFieldValue_t *) = nullptr;
+    int (*energy)(nvmlDevice_t, unsigned long long *) = nullptr;   /* QSB_TEL_HOST: cumulative mJ since driver load */
+    int (*fan)(nvmlDevice_t, unsigned *) = nullptr;
+    int (*thresh)(nvmlDevice_t, int, unsigned *) = nullptr;
 };
 enum { NVML_FI_DEV_MEMORY_TEMP = 82 };   /* nvml.h field id; a GeForce driver may answer "not supported" */
 /* 0 on success, else the step that failed (1 dlopen, 2 symbols, 3 init, 4 device) */
@@ -111,6 +118,8 @@ static int nvml_open(Nvml &n, const char *pci) {
     QTEL_SYM(reasons, "nvmlDeviceGetCurrentClocksEventReasons");
     if (!n.reasons) QTEL_SYM(reasons, "nvmlDeviceGetCurrentClocksThrottleReasons");
     QTEL_SYM(limit, "nvmlDeviceGetEnforcedPowerLimit"); QTEL_SYM(fields, "nvmlDeviceGetFieldValues");
+    QTEL_SYM(energy, "nvmlDeviceGetTotalEnergyConsumption"); QTEL_SYM(fan, "nvmlDeviceGetFanSpeed");
+    QTEL_SYM(thresh, "nvmlDeviceGetTemperatureThreshold");
 #undef QTEL_SYM
     if (!n.init || !n.clock || !n.power || !n.temp || (!n.by_pci && !n.by_index)) return 2;
     if (n.init() != 0) return 3;
@@ -125,6 +134,60 @@ static double now_s() { struct timespec t; clock_gettime(CLOCK_MONOTONIC, &t); r
 static const double g_exec_t = now_s();   /* static initialisation: about exec */
 /* gpu: GPU candidates walked so far (the host loop's g_total_searched); cpu: co-grinder candidates (nullptr if none); stop: the
  * stop signal; pci: the device's PCI bus id (cudaDeviceGetPCIBusId), may be empty. */
+/* ---- QSB_TEL_HOST (Rocky, 2026-10-07; host only, not an image knob): the ranked host's facts as event frames ----
+ * The public data shows 32 logical CPUs and nothing else about the host. Once at sampler start: the CPU brand string
+ * (codes 6..17, CPUID 0x80000002..4, four bytes per event), CPUID signature (18), logical CPUs online (19), physical
+ * cores (20), MemTotal MiB (21), ISA bits (22: 1 avx2, 2 bmi2, 4 avx512f, 8 avx512ifma, 16 sha-ni, 32 avx512vbmi2),
+ * NUMA nodes (23), GPU memory clock MHz (24), GPU slowdown threshold C (25). Every 30 s: the GPU's cumulative energy
+ * counter in mJ mod 2^32 (26) and fan speed % (27). Reads only; any failure leaves that event out. */
+#ifndef QSB_TEL_HOST
+#define QSB_TEL_HOST 1
+#endif
+#if QSB_TEL_HOST
+static void host_events(Nvml &n, int st) {
+    unsigned a, b, c, d;
+    if (__get_cpuid(0x80000000u, &a, &b, &c, &d) && a >= 0x80000004u) {
+        for (unsigned leaf = 0; leaf < 3; leaf++) {
+            __get_cpuid(0x80000002u + leaf, &a, &b, &c, &d);
+            const unsigned w[4] = {a, b, c, d};
+            for (int i = 0; i < 4; i++) push_event(0, 6 + 4 * leaf + i, w[i]);
+        }
+    }
+    if (__get_cpuid(1u, &a, &b, &c, &d)) push_event(0, 18, a);
+    const long on = sysconf(_SC_NPROCESSORS_ONLN); if (on > 0) push_event(0, 19, (uint32_t)on);
+    if (FILE *f = fopen("/proc/cpuinfo", "r")) {
+        char line[512]; int phys = -1; long seen[1024]; int ns = 0;
+        while (fgets(line, sizeof line, f)) {
+            int v;
+            if (sscanf(line, "physical id : %d", &v) == 1) phys = v;
+            else if (sscanf(line, "core id : %d", &v) == 1) {
+                const long key = ((long)phys << 20) | v; bool dup = false;
+                for (int i = 0; i < ns; i++) if (seen[i] == key) { dup = true; break; }
+                if (!dup && ns < 1024) seen[ns++] = key;
+            }
+        }
+        fclose(f);
+        if (ns) push_event(0, 20, (uint32_t)ns);
+    }
+    if (FILE *f = fopen("/proc/meminfo", "r")) {
+        char line[256]; unsigned long kb = 0;
+        while (fgets(line, sizeof line, f)) if (sscanf(line, "MemTotal: %lu kB", &kb) == 1) break;
+        fclose(f);
+        if (kb) push_event(0, 21, (uint32_t)(kb >> 10));
+    }
+    unsigned isa = 0;
+    if (__get_cpuid_count(7u, 0u, &a, &b, &c, &d))
+        isa = ((b >> 5) & 1u) | (((b >> 8) & 1u) << 1) | (((b >> 16) & 1u) << 2) | (((b >> 21) & 1u) << 3) |
+              (((b >> 29) & 1u) << 4) | (((c >> 6) & 1u) << 5);
+    push_event(0, 22, isa);
+    glob_t g; if (glob("/sys/devices/system/node/node[0-9]*", 0, nullptr, &g) == 0) { push_event(0, 23, (uint32_t)g.gl_pathc); globfree(&g); }
+    if (st == 0) {
+        unsigned v = 0;
+        if (n.clock && n.clock(n.dev, 2 /* NVML_CLOCK_MEM */, &v) == 0) push_event(0, 24, v);
+        if (n.thresh && n.thresh(n.dev, 1 /* NVML_TEMPERATURE_THRESHOLD_SLOWDOWN */, &v) == 0) push_event(0, 25, v);
+    }
+}
+#endif
 static void start(count_fn gpu, count_fn cpu, stop_fn stop, const char *pci) {
     std::string pcis = pci ? pci : "";
     const unsigned exec_ms = (unsigned)((now_s() - g_exec_t) * 1000.0);
@@ -132,6 +195,9 @@ static void start(count_fn gpu, count_fn cpu, stop_fn stop, const char *pci) {
         Nvml n; const int st = nvml_open(n, pcis.c_str());
         push_event(0, 3, exec_ms); push_event(0, 2, (uint32_t)st); push_event(0, 5, 1000);
         if (st == 0 && n.limit) { unsigned mw = 0; if (n.limit(n.dev, &mw) == 0) push_event(0, 1, mw); }
+#if QSB_TEL_HOST
+        try { host_events(n, st); } catch (...) {}
+#endif
         const double t0 = now_s();
         uint64_t last_drop = 0;
         for (unsigned seq = 1; !stop(); seq++) {
@@ -152,6 +218,13 @@ static void start(count_fn gpu, count_fn cpu, stop_fn stop, const char *pci) {
                 }
             }
             push_sample(s);
+#if QSB_TEL_HOST
+            if (st == 0 && seq % 30 == 0) {
+                unsigned long long mj = 0; unsigned fs = 0;
+                if (n.energy && n.energy(n.dev, &mj) == 0) push_event(seq, 26, (uint32_t)mj);
+                if (n.fan && n.fan(n.dev, &fs) == 0) push_event(seq, 27, fs);
+            }
+#endif
             uint64_t d; { std::lock_guard<std::mutex> g(g_q.m); d = g_q.dropped; }
             if (d != last_drop) { push_event(seq, 4, (uint32_t)d); last_drop = d; }
         }
