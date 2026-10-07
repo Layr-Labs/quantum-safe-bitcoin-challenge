@@ -315,7 +315,11 @@ __device__ __forceinline__ uint32_t qsb_packed_finish(
         /* variant 2: plain square (45 IMAD.WIDE, [0,2^256) like _ModMultCore), lazy add of E,
          * borrow-corrected subtraction of x1 (its +p correction underflows only for x1 >= p,
          * the same 2^-223 window). */
+#if QSB_FIN_SQR_TOP
+        QSB_FIN_SUB(t,sum,c); qsb_fin_square_top(u,t); QSB_FIN_ADDL(v,u,e); QSB_FIN_SUB(s,v,x1);
+#else
         QSB_FIN_SUB(t,sum,c); _ModSqr(u,t); QSB_FIN_ADDL(v,u,e); QSB_FIN_SUB(s,v,x1);
+#endif
 #else
         QSB_FIN_ADDL(v,x1,e); QSB_FIN_SUB(t,sum,c); _ModSqrAddSub2(s,t,v,x1);
 #endif
