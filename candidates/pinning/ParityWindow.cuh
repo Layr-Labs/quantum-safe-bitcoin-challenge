@@ -25,6 +25,23 @@
 #define QSB_PW_TOP0 "mov.u32 top,0;\n"
 #define QSB_PW_MID1_TAIL "and.b32 mid1,mid1,1;\n"
 #endif
+/* QSB_PW_D13HI: the narrow window's D13 pair (a6*b7 + a7*b6) contributes only its
+ * high 32-bit halves (mul.hi) plus the carry of those halves. The two low halves
+ * sum to less than 2^33, so they send 0 or 1 into bit 32 of D13; omitting that
+ * carry underestimates `top` by at most 1. The inherited D5/D12 omission already
+ * lets the old q exceed this q by 986; one more unit makes 987. Keep q away from
+ * 1959+987 values (0xfffff47e) instead of 1959+986 (0xfffff47f). Then bit 32 of
+ * q and of mid still match the full product, and the fallback path is unchanged.
+ * 0 restores the two mul.wide D13 products and the old bound. */
+#ifndef QSB_PW_D13HI
+#define QSB_PW_D13HI 1
+#endif
+#if QSB_PW_D13HI != 0 && QSB_PW_D13HI != 1
+#error "QSB_PW_D13HI must be 0 or 1"
+#endif
+#if QSB_PW_D13HI && !QSB_PARITY_WINDOW_NARROW
+#error "QSB_PW_D13HI is written for the narrow 18-product window"
+#endif
 
 __device__ __forceinline__ void qsb_parity_window_words(
     uint64_t &mid, uint64_t &top, const uint64_t *a, const uint64_t *b) {
@@ -136,9 +153,27 @@ __device__ __forceinline__ void qsb_parity_window_words(
 #endif
         QSB_PW_MID1_TAIL
         "mov.b64 %0,{mid0,mid1};\n"
-#if QSB_PARITY_WINDOW_NARROW
+#if QSB_PARITY_WINDOW_NARROW && QSB_PW_D13HI
+        "mul.hi.u32 lo,a6,b7;\n"
+        QSB_PW_TOP0
+        "mul.hi.u32 hi,a7,b6;\n"
+        "add.cc.u32 lo,lo,hi;\n"
+        "addc.u32 top,top,0;\n"
+        "mov.b64 high,{lo,top};\n"
+        "mul.wide.u32 t,a7,b7;\n"
+        "add.u64 high,high,t;\n"
+        "mov.u64 %1,high;\n"
+#elif QSB_PARITY_WINDOW_NARROW
         "mul.wide.u32 acc,a6,b7;\n"
         QSB_PW_TOP0
+        "mul.wide.u32 t,a7,b6;\n"
+        "add.cc.u64 acc,acc,t;\n"
+        "addc.u32 top,top,0;\n"
+        "mov.b64 {lo,hi},acc;\n"
+        "mov.b64 high,{hi,top};\n"
+        "mul.wide.u32 t,a7,b7;\n"
+        "add.u64 high,high,t;\n"
+        "mov.u64 %1,high;\n"
 #else
         "mul.wide.u32 acc,a5,b7;\n"
         "mov.u32 pcarry,0;\n"
@@ -154,7 +189,6 @@ __device__ __forceinline__ void qsb_parity_window_words(
         "mul.wide.u32 t,a6,b7;\n"
         "add.cc.u64 acc,acc,t;\n"
         "addc.u32 top,top,0;\n"
-#endif
         "mul.wide.u32 t,a7,b6;\n"
         "add.cc.u64 acc,acc,t;\n"
         "addc.u32 top,top,0;\n"
@@ -163,6 +197,7 @@ __device__ __forceinline__ void qsb_parity_window_words(
         "mul.wide.u32 t,a7,b7;\n"
         "add.u64 high,high,t;\n"
         "mov.u64 %1,high;\n"
+#endif
         "}\n"
         : "=l"(mid),"=l"(top)
         : "l"(a[0]),"l"(a[1]),"l"(a[2]),"l"(a[3]),
@@ -181,11 +216,17 @@ __device__ __forceinline__ uint32_t qsb_parity_product_window(
     // floor((D6+floor(D5/B))/B) by at most 6; omitting D12 changes
     // floor((D13+floor(D12/B))/B) by at most 3. The old top word is
     // below B^2, so the old q exceeds this q by at most 6+3+977=986
-    /* (the 977 term covers a carry into top's high limb). Keep x7 away */
-    /* from its last seven values and q from its last 1959+986 values. */
-    /* Then the inherited window would also accept, with identical bit-32 */
-    /* values of mid and q. All remaining cases keep the full-product path. */
+    /* (the 977 term covers a carry into top's high limb). QSB_PW_D13HI */
+    /* drops the D13 low-half carry (0 or 1), so the bound is 987. Keep */
+    /* x7 away from its last seven values and q from its last 1959+986 */
+    /* (or 1959+987) values. Then the inherited window would also accept, */
+    /* with identical bit-32 values of mid and q. All remaining cases */
+    /* keep the full-product path. */
+#if QSB_PW_D13HI
+    if(x7<0xfffffff9u && (uint32_t)q<0xfffff47eu) {
+#else
     if(x7<0xfffffff9u && (uint32_t)q<0xfffff47fu) {
+#endif
 #else
     // Unknown carries change q by at most 1958. Exclude the final all-one
     /* limb too, so the baseline sum-parity exceptional correction cannot fire. */

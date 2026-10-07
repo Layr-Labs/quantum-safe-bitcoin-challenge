@@ -41,6 +41,10 @@
 #define QSB_NOJIT 1
 #endif
 
+#ifndef QSB_CARRIER_IDLE_SLOTS
+#define QSB_CARRIER_IDLE_SLOTS 1
+#endif
+
 enum QsbCarrierKernel {
     QK_S0 = 0,   /* kernel_pinning_pipeline<true,0>  (prepare) */
     QK_S2,       /* kernel_pinning_pipeline<true,2>  (finish)  */
@@ -135,7 +139,12 @@ static void qsb_carrier_init(const cudaDeviceProp &prop) {
         const char *name = i < n_gen ? qsb_carrier_kernel_names[i] : fixed[i];
         if (i >= QK_RF) {
             if (!name || !name[0]) name = fixed[i];
-            if (!name || !name[0]) { all = 0; continue; }
+            if (!name || !name[0]) {
+                /* QK_LC and QK_CE have no launch site: an empty slot there leaves no
+                 * compute_52 launch behind, so it does not cost the no-JIT path. */
+                if (!(QSB_CARRIER_IDLE_SLOTS && i >= QK_LC)) all = 0;
+                continue;
+            }
             if (cudaLibraryGetKernel(&g_qsb_carrier.k[i], g_qsb_carrier.lib, name) != cudaSuccess) {
                 g_qsb_carrier.k[i] = nullptr; all = 0; cudaGetLastError();
             }
