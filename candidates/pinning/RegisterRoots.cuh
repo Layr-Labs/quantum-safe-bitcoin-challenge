@@ -10,8 +10,7 @@ __device__ __forceinline__ bool qbw_root_load(
     uint64_t x[5],const uint64_t *roots,unsigned i,unsigned count) {
     x[0]=1;x[1]=x[2]=x[3]=x[4]=0;
     if(i>=count)return false;
-    #pragma unroll
-    for(int k=0;k<4;++k)x[k]=roots[(size_t)i*4u+k];
+    qsb_root_load4(x,roots+(size_t)i*4u);
     qsb_field_normalize(x);
     const bool nz=(x[0]|x[1]|x[2]|x[3])!=0;
     if(!nz)x[0]=1;
@@ -22,8 +21,7 @@ __device__ __forceinline__ void qbw_root_store(
     if(i>=count)return;
     qsb_field_normalize(x);
     if(!nonzero)x[0]=x[1]=x[2]=x[3]=0;
-    #pragma unroll
-    for(int k=0;k<4;++k)roots[(size_t)i*4u+k]=x[k];
+    qsb_root_store4(roots+(size_t)i*4u,x);
     uint64_t b[5]={
 #if QSB_ISO_XR
         pin_iso_u2ry_words[0],pin_iso_u2ry_words[1],
@@ -37,8 +35,7 @@ __device__ __forceinline__ void qbw_root_store(
     _ModAdd256(b,b,b);
 #endif
     uint64_t weighted[5];qsb_field_mul(weighted,x,b);
-    #pragma unroll
-    for(int k=0;k<4;++k)roots[((size_t)count+i)*4u+k]=weighted[k];
+    qsb_root_store4(roots+((size_t)count+i)*4u,weighted);
 }
 
 __device__ __forceinline__ void qbw_scratch_put(
