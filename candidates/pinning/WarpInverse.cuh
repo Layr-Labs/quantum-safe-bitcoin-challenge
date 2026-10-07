@@ -15,6 +15,7 @@ namespace qsb_warp_research {
 #define QWR_INVERSE_BIAS 1
 #define QWR_PL_INIT {0xFFFFFC2Fu,0xFFFFFFFEu,0xFFFFFFFFu,0xFFFFFFFFu,0xFFFFFFFFu,0xFFFFFFFFu,0xFFFFFFFFu,0xFFFFFFFFu,0u}
 
+
 __constant__ uint64_t QWR_BY_LUT[832]={
     0x0000000601000040ULL,0x00000006013F0040ULL,0x00000006013E0040ULL,0x00000006013D0040ULL,0x00000006013C0040ULL,0x00000006013B0040ULL,
     0x00000006013A0040ULL,0x0000000601390040ULL,0x0000000601380040ULL,0x0000000601370040ULL,0x0000000601360040ULL,0x0000000601350040ULL,
@@ -170,36 +171,14 @@ template<int BYTE> QWR_DEV int32_t qwr_by_signed_byte(uint32_t value){
 #endif
 }
 
-#ifndef QSB_QWR_RATIO_MAD
-#define QSB_QWR_RATIO_MAD 0
-#endif
-
 QWR_DEV int32_t qwr_divstep30_column(int32_t delta,uint32_t f,uint32_t g,
                                   uint32_t column,int32_t *top,int32_t *bottom){
     int32_t u=1-(int32_t)column,q=(int32_t)column;
     #pragma unroll
     for(int k=0;k<5;k++){
         const int32_t dc=delta<-6?-6:(delta>6?6:delta);
-#if QSB_QWR_RATIO_MAD==2
-
-        const uint32_t gf=g*f,r8=(gf*(16u-8u*(f*f)))&0x1f8u;
-        const uint64_t packed=*reinterpret_cast<const uint64_t*>(
-            reinterpret_cast<const char*>(QWR_BY_LUT)+(((uint32_t)(dc+6)<<9)+r8));
-#elif QSB_QWR_RATIO_MAD
-        const uint32_t gf=g*f,ff=f*f;
-        uint32_t rw;
-#ifdef __CUDA_ARCH__
-        asm("mad.lo.u32 %0,%1,%2,%3;" : "=r"(rw) : "r"(ff),"r"(0u-gf),"r"(gf<<1));
-#else
-        rw=ff*(0u-gf)+(gf<<1);
-#endif
-        const uint32_t ratio=rw&63u;
-#else
         const uint32_t fi=f*(2u-f*f),ratio=(g*fi)&63u;
-#endif
-#if QSB_QWR_RATIO_MAD!=2
         const uint64_t packed=QWR_BY_LUT[((uint32_t)(dc+6)<<6)|ratio];
-#endif
         const uint32_t e=(uint32_t)packed,flags=(uint32_t)(packed>>32);
         const int32_t a=qwr_by_signed_byte<0>(e),b=qwr_by_signed_byte<1>(e);
         const int32_t c=qwr_by_signed_byte<2>(e),d=qwr_by_signed_byte<3>(e);
@@ -237,18 +216,6 @@ QWR_DEV void qwr_canon(uint32_t *X){
     for(int i=0;i<8;i++)X[i]=(X[i]&keep)|(T[i]&~keep);
 }
 
-#ifndef QSB_QWR_CSAVE
-#define QSB_QWR_CSAVE 1
-#endif
-
-#ifndef QSB_QWR_XT_LANE7
-#define QSB_QWR_XT_LANE7 1
-#endif
-#if QSB_QWR_XT_LANE7 && !QSB_QWR_CSAVE
-#undef QSB_QWR_XT_LANE7
-#define QSB_QWR_XT_LANE7 0
-#endif
-
 __device__ __forceinline__ bool qwr_inverse_limbs_bounded(uint64_t *R,int lane){
     constexpr unsigned mask=0xffffffffu;
     const int digit=lane&7,row=lane>>3,start=lane&~7;
@@ -265,59 +232,6 @@ __device__ __forceinline__ bool qwr_inverse_limbs_bounded(uint64_t *R,int lane){
     uint32_t x=odd?(rs?scaled:xl):(rs?0u:pl);
     int32_t xt=0,delta=1;
     unsigned batches=0;
-#if QSB_QWR_CSAVE
-    int64_t xs=(int64_t)x;
-    while(true){
-        const uint32_t f0=__shfl_sync(mask,(uint32_t)xs,0),g0=__shfl_sync(mask,(uint32_t)xs,8);
-        if(batches!=0 && g0==0u){
-            int64_t carry=0;
-            uint32_t word=0;
-            #pragma unroll
-            for(int i=0;i<8;i++){
-                const int64_t s=__shfl_sync(mask,xs,start+i)+carry;
-                if(i==digit)word=(uint32_t)s;
-                carry=s>>32;
-            }
-            xs=(int64_t)word;
-#if QSB_QWR_XT_LANE7
-            xt=(int32_t)((uint32_t)xt+(uint32_t)carry);
-            if((__ballot_sync(mask,word!=0u || (digit==7 && xt!=0))&0x0000ff00u)==0)break;
-#else
-            xt+=(int32_t)carry;
-            if((__ballot_sync(mask,word!=0u || xt!=0)&0x0000ff00u)==0)break;
-#endif
-        }
-        if(batches==QWR_ROOT_MAX_BATCHES)return false;
-        ++batches;
-        int32_t top,bottom;
-        delta=qwr_divstep30_column(delta,f0,g0,rs,&top,&bottom);
-        const int32_t selected=odd?bottom:top;
-        const int32_t a=__shfl_sync(mask,selected,odd?24:0);
-        const int32_t b=__shfl_sync(mask,selected,odd?8:16);
-        const int64_t ys=__shfl_sync(mask,xs,lane^8);
-        const int32_t yt=__shfl_sync(mask,xt,lane^8);
-        int64_t acc=(int64_t)a*xs+(int64_t)b*ys;
-        uint32_t m=__shfl_sync(mask,(uint32_t)acc,start);
-        m=(m*QWR_MM32)&QWR_MASK30&(0u-rs);
-        const uint32_t factor=digit==0?977u:digit==1?1u:0u;
-        acc-=(int64_t)((uint64_t)factor*m);
-        const int64_t high=(int64_t)a*xt+(int64_t)b*yt+(int64_t)m;
-        const uint32_t r=(uint32_t)acc&QWR_MASK30;
-        const uint32_t rn0=__shfl_down_sync(mask,r,1,8);
-        const uint32_t rn=digit==7?((uint32_t)high&QWR_MASK30):rn0;
-        const int64_t t=(acc>>30)+((int64_t)rn<<2);
-        const int32_t k=(int32_t)(t>>32);
-        const int32_t kp0=__shfl_up_sync(mask,k,1,8);
-        xs=(int64_t)(uint32_t)t+(digit?kp0:0);
-#if QSB_QWR_XT_LANE7
-        xt=(int32_t)((uint32_t)(high>>30)+(uint32_t)k);
-#else
-        const int32_t k7=__shfl_sync(mask,k,start+7);
-        xt=(int32_t)(high>>30)+k7;
-#endif
-    }
-    x=(uint32_t)xs;
-#else
     while(true){
         if(batches==QWR_ROOT_MAX_BATCHES)return false;
         ++batches;
@@ -384,17 +298,11 @@ __device__ __forceinline__ bool qwr_inverse_limbs_bounded(uint64_t *R,int lane){
         xt=(int32_t)(high>>30);
         if((__ballot_sync(mask,x!=0 || xt!=0)&0x0000ff00u)==0)break;
     }
-#endif
     uint32_t out[9];
     #pragma unroll
     for(int i=0;i<8;i++)out[i]=__shfl_sync(mask,x,16+i);
-#if QSB_QWR_XT_LANE7
-    out[8]=(uint32_t)__shfl_sync(mask,xt,23);
-    const uint32_t neg=(uint32_t)(__shfl_sync(mask,xt,7)<0);
-#else
     out[8]=(uint32_t)__shfl_sync(mask,xt,16);
     const uint32_t neg=(uint32_t)(__shfl_sync(mask,xt,0)<0);
-#endif
     qwr_condneg(out,neg);
     qwr_canon(out);
     #pragma unroll
@@ -426,20 +334,12 @@ __device__ __noinline__ void qwr_fermat_scaled(uint64_t *R) {
 #endif
     for(int k=0;k<5;++k)R[k]=y[k];
 }
-
-#ifndef QSB_QWR_BY741
-#define QSB_QWR_BY741 1
-#endif
 /* All 32 lanes of warp zero pass the SAME canonical input; same scaled output. */
 QWR_DEV void qwr_inverse_scaled(uint64_t *R,int lane){
-#if QSB_QWR_BY741
-    (void)qwr_inverse_limbs_bounded(R,lane);
-#else
     if(qwr_inverse_limbs_bounded(R,lane))return;
     if(lane==0)qwr_fermat_scaled(R);
     for(int k=0;k<4;++k)R[k]=__shfl_sync(0xffffffffu,R[k],0);
     R[4]=0;
-#endif
 }
 #undef QWR_DEV
 #undef QWR_ROOT_MAX_BATCHES
