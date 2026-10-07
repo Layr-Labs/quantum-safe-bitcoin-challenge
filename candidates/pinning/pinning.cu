@@ -1,4 +1,4 @@
-#define QSB_DRAW_TAG 0x9b1cd8c5u /* inert draw tag */
+#define QSB_DRAW_TAG 0x2f85267au /* inert draw tag */
 #define QSB_DRAW_TAG 0x93438c22u /* inert draw tag */
 #ifndef QSB_SHA_LEA
 #define QSB_SHA_LEA 1 /* ercumentyildirim b62c41b8 via cefika 6fd66979: SHA-256 LEA.HI rotate-add in the prepare tail-block and outer-digest rounds (exact); 0 = off */
