@@ -627,6 +627,9 @@ template<int N> __device__ __forceinline__ void qsb_cofactor_top5(
  * Bit 8 (up-sweep) and bit 128 (down-sweep): the two-level loops are written out level by
  * level (same lanes, products and barriers), so the loop counters and their index
  * arithmetic become immediates. */
+#ifndef QSB_TV_ST128
+#define QSB_TV_ST128 1
+#endif
 #define QSB_TV_COLS (3*QSB_TREE_N+QSB_TREE_N/2)
 #define QSB_TV_PLANE (QSB_TV_COLS*16)
 __device__ __forceinline__ void qsb_tv_ld(uint64_t *x, const char *T, uint32_t off) {
@@ -635,12 +638,20 @@ __device__ __forceinline__ void qsb_tv_ld(uint64_t *x, const char *T, uint32_t o
 }
 __device__ __forceinline__ void qsb_tv_st(char *T, uint32_t off, const uint64_t *x) {
 #ifdef __CUDA_ARCH__
-    /* volatile: neither NVVM nor ptxas merges these into 16-byte stores */
     const uint32_t a=(uint32_t)__cvta_generic_to_shared(T+off);
+#if QSB_TV_ST128
+    /* QSB_TV_ST128: the same four words at the same byte offsets as two 16-byte stores (one per plane).
+     * The planes are 16-byte aligned (qsb_tv_ld already reads them as ulonglong2). Same bytes, same
+     * barriers: bit-identical. Default 0 = the four 8-byte stores below. */
+    asm volatile("st.volatile.shared.v2.u64 [%0], {%1, %2};\n\tst.volatile.shared.v2.u64 [%0+%5], {%3, %4};"
+                 :: "r"(a), "l"(x[0]), "l"(x[1]), "l"(x[2]), "l"(x[3]), "n"(QSB_TV_PLANE) : "memory");
+#else
+    /* volatile: neither NVVM nor ptxas merges these into 16-byte stores */
     asm volatile("st.volatile.shared.u64 [%0], %1;\n\tst.volatile.shared.u64 [%0+8], %2;\n\t"
                  "st.volatile.shared.u64 [%0+%5], %3;\n\tst.volatile.shared.u64 [%0+%6], %4;"
                  :: "r"(a), "l"(x[0]), "l"(x[1]), "l"(x[2]), "l"(x[3]),
                     "n"(QSB_TV_PLANE), "n"(QSB_TV_PLANE+8) : "memory");
+#endif
 #else   /* host build: the same four words at the same offsets */
     *(uint64_t *)(T+off)=x[0];*(uint64_t *)(T+off+8)=x[1];
     *(uint64_t *)(T+off+QSB_TV_PLANE)=x[2];*(uint64_t *)(T+off+QSB_TV_PLANE+8)=x[3];
