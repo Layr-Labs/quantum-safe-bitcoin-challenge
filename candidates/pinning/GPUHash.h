@@ -15,9 +15,9 @@
  * along with this program. If not, see <http://www.gnu.org/licenses/>.
 */
 
-// ---------------------------------------------------------------------------------
-// SHA256
-// ---------------------------------------------------------------------------------
+/* --------------------------------------------------------------------------------- */
+/* SHA256 */
+/* --------------------------------------------------------------------------------- */
 
 __device__ __constant__ uint32_t K[] = {
 	0x428A2F98, 0x71374491, 0xB5C0FBCF, 0xE9B5DBA5,
@@ -155,7 +155,7 @@ __device__ __forceinline__ uint32_t s1(uint32_t x)
 //#define Maj(x,y,z) ((x&y)^(x&z)^(y&z))
 //#define Ch(x,y,z)  ((x&y)^(~x&z))
 
-// The following functions are equivalent to the above
+/* The following functions are equivalent to the above */
 #define Maj(x,y,z) ((x & y) | (z & (x | y)))
 #define Ch(x,y,z) (z ^ (x & (y ^ z)))
 
@@ -166,7 +166,7 @@ __device__ __forceinline__ uint32_t s1(uint32_t x)
     d += t1; \
     h = t1 + t2;
 
-// WMIX
+/* WMIX */
 #define WMIX() { \
 w[0] += s1(w[14]) + w[9] + s0(w[1]);\
 w[1] += s1(w[15]) + w[10] + s0(w[2]);\
@@ -186,7 +186,7 @@ w[14] += s1(w[12]) + w[7] + s0(w[15]);\
 w[15] += s1(w[13]) + w[8] + s0(w[0]);\
 }
 
-// ROUND
+/* ROUND */
 #define SHA256_RND(k) {\
 S2Round(a, b, c, d, e, f, g, h, K[k], w[0]);\
 S2Round(h, a, b, c, d, e, f, g, K[k + 1], w[1]);\
@@ -635,9 +635,9 @@ __device__ void _FindComboStart(int8_t * inputComboGPU, int8_t * combo) {
   }
 }
 
-// ---------------------------------------------------------------------------------
-// RIPEMD160
-// ---------------------------------------------------------------------------------
+/* --------------------------------------------------------------------------------- */
+/* RIPEMD160 */
+/* --------------------------------------------------------------------------------- */
 __device__ __constant__ uint64_t ripemd160_sizedesc_32 = 32 << 3;
 
 __device__ void _RIPEMD160Initialize(uint32_t s[5])
@@ -862,7 +862,7 @@ __device__ __noinline__ void _GetHash160Comp(uint64_t* x, uint8_t isOdd, uint8_t
 	uint32_t publicKeyBytes[16];
 	uint32_t s[16];
 
-	// Compressed public key
+	/* Compressed public key */
 	publicKeyBytes[0] = __byte_perm(x32[7], 0x2 + isOdd, 0x4321);
 	publicKeyBytes[1] = __byte_perm(x32[7], x32[6], 0x0765);
 	publicKeyBytes[2] = __byte_perm(x32[6], x32[5], 0x0765);
@@ -905,7 +905,7 @@ __device__ __noinline__ void _GetHash160(uint64_t* x, uint64_t* y, uint8_t* hash
 	uint32_t publicKeyBytes[32];
 	uint32_t s[16];
 
-	// Uncompressed public key
+	/* Uncompressed public key */
 	publicKeyBytes[0] = __byte_perm(x32[7], 0x04, 0x4321);
 	publicKeyBytes[1] = __byte_perm(x32[7], x32[6], 0x0765);
 	publicKeyBytes[2] = __byte_perm(x32[6], x32[5], 0x0765);
@@ -965,7 +965,7 @@ __device__ __noinline__ void _GetHash160P2SHComp(uint64_t* x, uint8_t isOdd, uin
 	uint32_t s[16];
 	_GetHash160Comp(x, isOdd, (uint8_t*)h);
 
-	// P2SH script script
+	/* P2SH script script */
 	scriptBytes[0] = __byte_perm(h[0], 0x14, 0x5401);
 	scriptBytes[1] = __byte_perm(h[0], h[1], 0x2345);
 	scriptBytes[2] = __byte_perm(h[1], h[2], 0x2345);
@@ -1046,9 +1046,9 @@ __device__ __noinline__ void _GetHash160P2SHUncomp(uint64_t* x, uint64_t* y, uin
 
 
 
-// ---------------------------------------------------------------------------------
-// KECCAK/SHA3
-// ---------------------------------------------------------------------------------
+/* --------------------------------------------------------------------------------- */
+/* KECCAK/SHA3 */
+/* --------------------------------------------------------------------------------- */
 
 
 typedef union {

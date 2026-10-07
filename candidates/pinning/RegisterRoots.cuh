@@ -155,7 +155,7 @@ __device__ __forceinline__ void qsb_block_inverse_register_n(uint64_t *value){
     for(int k=0;k<4;++k){aa[k]=inverses[k][ib+(lane&15u)];bb[k]=products[k][pb+(lane^16u)];}
     aa[4]=bb[4]=0;QSB_RF_MUL(value,aa,bb);qsb_field_normalize(value);
 }
-// Launch exactly <<<1,QSB_RROOT_LANES>>> with 1<=count<=1024.
+/* Launch exactly <<<1,QSB_RROOT_LANES>>> with 1<=count<=1024. */
 /* Physical capacity is 2048 four-word rows even for a partial final tile. */
 #if QSB_RROOT_WIDE == 2
 /* QSB_RROOT_WIDE 2: the 256-lane shape with its four normalised roots, their nonzero flags and

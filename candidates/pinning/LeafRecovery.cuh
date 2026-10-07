@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-only
-// Uses the VanitySearch-derived field primitives in GPUMath.h.
+/* Uses the VanitySearch-derived field primitives in GPUMath.h. */
 // Squaring-free recovery identity: odinfree, public submission e00f5566.
 // 128-leaf pipeline geometry follows 0xCramJam, public submission 1a228081.
 // The scaled sibling checkpoint and truncated inverse expansion are new here.
@@ -11,7 +11,7 @@
 static_assert(QSB_RECOVERY_N==128 || QSB_RECOVERY_N==256,"supported tree width");
 
 // The tree multiplier retains the final reduction carry. Normalize at these
-// recovery boundaries, where additions, zero tests and parity require [0,p).
+/* recovery boundaries, where additions, zero tests and parity require [0,p). */
 __device__ __forceinline__ void qsb_recovery_mul(
     uint64_t *out, const uint64_t *a, const uint64_t *b) {
     uint64_t tmp[5];
@@ -30,7 +30,7 @@ __device__ __forceinline__ void qsb_recovery_denominator(
 #endif
     uint64_t d[4];
     // X<p, while d may use any 256-bit representative.  Under the problem
-    // isomorphism a is exactly +/-1, so select U or p-U with four cheap limbs
+    /* isomorphism a is exactly +/-1, so select U or p-U with four cheap limbs */
     // instead of a full field multiply.  The next multiply accepts the raw
     // congruent representative.
 #if QSB_ISO_XR
@@ -53,8 +53,8 @@ __device__ __forceinline__ void qsb_recovery_denominator(
 }
 
 // Preserve Y,V before this call. Instead of saving W, save H_i=U_i*W_sibling.
-// The finish stops at the pair inverse: H_i/(W_i*W_sibling)=U_i/W_i.
-// Inactive/singular lanes enter with W=1 and U=0; H=0 retains their mask.
+/* The finish stops at the pair inverse: H_i/(W_i*W_sibling)=U_i/W_i. */
+/* Inactive/singular lanes enter with W=1 and U=0; H=0 retains their mask. */
 __device__ __forceinline__ void qsb_recovery_product_checkpoint(
     const uint64_t *value, const uint64_t *U, ulonglong2 *saved,
     int batch_size, bool active, uint64_t *roots, uint64_t *checkpoint) {
@@ -105,7 +105,7 @@ __device__ __forceinline__ void qsb_recovery_product_checkpoint(
     }
 }
 
-// Only immutable INTERNAL products are required. The final leaf expansion is
+/* Only immutable INTERNAL products are required. The final leaf expansion is */
 // folded into the saved H, saving one N-element shared product plane per limb.
 __device__ __forceinline__ void qsb_recovery_pair_inverse(
     uint64_t *value, const uint64_t *roots, const uint64_t *checkpoint) {
@@ -144,10 +144,10 @@ __device__ __forceinline__ void qsb_recovery_pair_inverse(
     value[4]=0;
 }
 
-// P=(X/U,Y/V), V^2=U^3, R=(a,b), c=3*a^2/(2*b).
-// h=H/pair_product=U/[V*(a*U-X)] gives slopes l=(b*V-Y)*h,
+/* P=(X/U,Y/V), V^2=U^3, R=(a,b), c=3*a^2/(2*b). */
+/* h=H/pair_product=U/[V*(a*U-X)] gives slopes l=(b*V-Y)*h, */
 // m=(b*V+Y)*h. On the curve, x(P+R)=(l+m)*(l-c)+a,
-// x(P-R)=(l+m)*(m-c)+a. No field square is needed.
+/* x(P-R)=(l+m)*(m-c)+a. No field square is needed. */
 __device__ __forceinline__ uint32_t qsb_recovery_finish(
     const uint64_t *Y, const uint64_t *V, const uint64_t *H,
     const uint64_t *pair_inv, uint64_t *a, uint64_t *b, uint64_t *c,

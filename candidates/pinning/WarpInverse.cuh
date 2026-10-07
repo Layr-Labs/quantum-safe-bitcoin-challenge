@@ -1,8 +1,8 @@
-// SPDX-License-Identifier: GPL-3.0-only
+/* SPDX-License-Identifier: GPL-3.0-only */
 /* Pinning extension; mathematical model checked, native execution is remote only. */
 /* Derived from the PROMOTED Subset source a137e289b236c3622eba80f1ad5e9a0c8a91eb67. */
 // Preserves i34-9/VanitySearch (Jean Luc Pons), AbdelStark cooperative inverse,
-// ercumentyildirim table divsteps, newjordan and terrapinelf limb/uniform work.
+/* ercumentyildirim table divsteps, newjordan and terrapinelf limb/uniform work. */
 /* Original source comments and full sources are retained alongside this file. */
 /* Include after Pinning qsb_field_mul / qsb_field_normalize and ISO constants. */
 #pragma once
@@ -333,7 +333,7 @@ __device__ __forceinline__ bool qwr_inverse_limbs_bounded(uint64_t *R,int lane){
         uint32_t m=__shfl_sync(mask,(uint32_t)acc,start);
         m=(m*QWR_MM32)&QWR_MASK30&(0u-rs);
 #if QWR_INVERSE_CORRECTION
-        // The sparse modulus correction is one unsigned 32x32 product.
+        /* The sparse modulus correction is one unsigned 32x32 product. */
         // All eight lanes follow the same instruction stream.
         const uint32_t factor=digit==0?977u:digit==1?1u:0u;
         acc-=(int64_t)((uint64_t)factor*m);
@@ -404,7 +404,7 @@ __device__ __forceinline__ bool qwr_inverse_limbs_bounded(uint64_t *R,int lane){
 }
 /* The bounded path leaves R untouched on failure. Exponent p-2 is independent */
 /* of the divstep table and all products use the carry-complete field helper. */
-// Canonicalize every product here; this exceptional path is not throughput work.
+/* Canonicalize every product here; this exceptional path is not throughput work. */
 __device__ __noinline__ void qwr_fermat_scaled(uint64_t *R) {
     const uint64_t exponent[4]={0xFFFFFFFEFFFFFC2DULL,
         0xFFFFFFFFFFFFFFFFULL,0xFFFFFFFFFFFFFFFFULL,0xFFFFFFFFFFFFFFFFULL};

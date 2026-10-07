@@ -4,8 +4,8 @@
 
 namespace qsb {
 
-// Host scheduling only. Events establish dependencies; stream priority is
-// merely a scheduling hint and is never relied on for correctness.
+/* Host scheduling only. Events establish dependencies; stream priority is */
+/* merely a scheduling hint and is never relied on for correctness. */
 class CompletionLane {
  public:
   enum Mode { SameStream = 0, RootsPriority = 1, TailPriority = 2, SplitControl = 3 };

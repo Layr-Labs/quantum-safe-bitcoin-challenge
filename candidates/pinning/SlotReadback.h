@@ -1,12 +1,12 @@
-// SPDX-License-Identifier: GPL-3.0-only
+/* SPDX-License-Identifier: GPL-3.0-only */
 #pragma once
 #include <cuda_runtime.h>
 #include <cstdint>
 
 namespace qsb {
 
-// One counter plus the unchanged 1024 device hit slots. Only the counter and
-// first 64 hits cross to the host, in one transfer on the completion stream.
+/* One counter plus the unchanged 1024 device hit slots. Only the counter and */
+/* first 64 hits cross to the host, in one transfer on the completion stream. */
 class SlotReadback {
  public:
   SlotReadback() : device_(nullptr), host_(nullptr) {}

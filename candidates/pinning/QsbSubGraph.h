@@ -173,7 +173,7 @@ static void update_impl(cudaGraphExec_t exec, cudaGraphNode_t node,
     k.sharedMemBytes = saved.sharedMemBytes;
     k.kernelParams = args;
     /* CUDA copies these argument values. Updates affect only future launches, */
-    // including when earlier instances remain queued on this ring's stream.
+    /* including when earlier instances remain queued on this ring's stream. */
     driver_check(set_params((CUgraphExec)exec, (CUgraphNode)node, &params), "argument update");
 }
 template<typename... P, typename... A>
