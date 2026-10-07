@@ -56,8 +56,15 @@ static cpu_set_t g_worker_set; static int g_worker_set_on = 0;
 #define QSB_CG_B 2048                     /* candidates (locktimes) per chunk = inversion batch */
 #endif
 #define QSB_CG_BMAX QSB_CG_B
+#ifndef QSB_CG_ECBATCH
+#define QSB_CG_ECBATCH 1   /* AVX2 EC batch (cpu_cogrind3_vec_ecb.h) with prefetch distance 2; 0 = the previous co-grinder */
+#endif
 #ifndef QSB_CG_PF
+#if QSB_CG_ECBATCH
+#define QSB_CG_PF 2
+#else
 #define QSB_CG_PF 4                       /* table prefetch distance, in 4-candidate blocks */
+#endif
 #endif
 #define QSB_CG_MAXWIN 16
 #define QSB_CG_MAXW 256                   /* max worker threads */
@@ -503,7 +510,11 @@ static int fill_batch(worker_t *w) {
 
 /* ---------------- AVX2 EC back end ---------------- */
 #if defined(__x86_64__) && !defined(QSB_CG_NO_SIMD)
+#if QSB_CG_ECBATCH
+#include "cpu_cogrind3_vec_ecb.h"
+#else
 #include "cpu_cogrind3_vec.h"
+#endif
 #include "cpu_cogrind3_ifma.h"
 #define QSB_CG_HAVE_SIMD 1
 #else

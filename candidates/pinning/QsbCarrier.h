@@ -52,8 +52,9 @@ enum QsbCarrierKernel {
     QK_RF,       /* qsb_root_fused<K>             (optional: empty name when absent) */
     QK_RR,       /* qsb_root_register             (optional) */
     QK_PFC,      /* qsb_prefix_field_check_kernel (optional) */
-    QK_LC,
-    QK_CE,
+    /* All ten declared kernels have actual launch sites in this program.
+     * The generated empty LC/CE slots are not launchable and must not force
+     * the unused compute_52 module to receive duplicate constant uploads. */
     QK_N
 };
 

@@ -124,7 +124,7 @@ static bool qsb_register_startup_check(uint64_t *device, cudaStream_t stream) {
     }
     BN_free(p);BN_free(a);BN_free(inv);BN_free(weighted);BN_free(scale);BN_free(weight);BN_free(observed);BN_CTX_free(ctx);
     free(raw);free(got);
-    // An asynchronous CUDA fault can poison the context. Never silently retry
+    /* An asynchronous CUDA fault can poison the context. Never silently retry */
     /* work under the baseline after such a fault. Arithmetic/host-allocation */
     /* mismatch before search can safely retain the promoted root implementation. */
     if(error!=cudaSuccess)qsb_subpipe_die("register root startup check",error);
