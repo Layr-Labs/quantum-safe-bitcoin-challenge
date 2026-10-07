@@ -49,10 +49,6 @@ __global__ void __launch_bounds__(256,2) audit_inverses(const uint64_t *inputs,u
 }
 
 __global__ void audit_warp_roots(const uint64_t *inputs,uint64_t *results,int n){
-#if QSB_ROOT_LUT_SMEM
-    /* The column divstep reads its table from shared memory (QSB_ROOT_LUT_SMEM, tree.cu): fill it first. */
-    qsb_root_lut_issue(threadIdx.x,blockDim.x);qsb_root_lut_wait();__syncthreads();
-#endif
     int linear=blockIdx.x*blockDim.x+threadIdx.x;
     int i=linear/32,lane=threadIdx.x&31;
     if(i>=n || lane>=4)return;
@@ -63,10 +59,6 @@ __global__ void audit_warp_roots(const uint64_t *inputs,uint64_t *results,int n)
 }
 
 __global__ void audit_bounded_status(const uint64_t *inputs,uint64_t *results,int n){
-#if QSB_ROOT_LUT_SMEM
-    /* The column divstep reads its table from shared memory (QSB_ROOT_LUT_SMEM, tree.cu): fill it first. */
-    qsb_root_lut_issue(threadIdx.x,blockDim.x);qsb_root_lut_wait();__syncthreads();
-#endif
     int linear=blockIdx.x*blockDim.x+threadIdx.x;
     int i=linear/32,lane=threadIdx.x&31;
     if(i>=n || lane>=4)return;

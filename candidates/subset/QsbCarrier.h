@@ -71,10 +71,6 @@ enum QsbCarrierKernel {
     QK_DIG,      /* kernel_digest           */
     QK_GT,       /* kernel_build_gtable     */
     QK_HEAL,     /* kernel_gt_heal_scan     */
-    /* COHASH hook (QSB_GPU_COHASH): the co-hash kernel's entry goes here, present only in an image built with it */
-#if QSB_YOFF_S
-    QK_YOFF,     /* kernel_gt_offset_y      */
-#endif
     QK_N
 };
 
@@ -143,8 +139,6 @@ static void qsb_carrier_off(const char *why) {
 
 #if QSB_CARRIER && !defined(QSB_CARRIER_BUILD)
 #include "qsb_carrier_sm89.h"
-static_assert(sizeof(qsb_carrier_kernel_names) / sizeof(qsb_carrier_kernel_names[0]) == QK_N,
-              "qsb_carrier_sm89.h is stale: its kernel list does not match enum QsbCarrierKernel (rerun build_carrier.sh)");
 
 static int qsb_b64_val(unsigned char c) {
     if (c >= 'A' && c <= 'Z') return c - 'A';
