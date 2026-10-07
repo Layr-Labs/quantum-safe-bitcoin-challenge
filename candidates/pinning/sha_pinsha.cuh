@@ -486,10 +486,26 @@ QSB_RL_F(c, d, e, f, g, h, a, b, QSB_KWF(qsb_klit(k + 14), w[14]));\
 QSB_RND15L_F(k);\
 QSB_RL_F(b, c, d, e, f, g, h, a, QSB_KWF(qsb_klit(k + 15), w[15]));\
 }
-#define QSB_STEPL_F(j, a,b,c,d,e,f,g,h, base) do { \
+/* Candidate 079: W32..W62 retain their circular schedule, using one ALU sum
+ * for the first three addends and the multiply pipe for the last addend. */
+#ifndef QSB_FIN_WMIX_ALU3
+#define QSB_FIN_WMIX_ALU3 1
+#endif
+#if QSB_FIN_WMIX_ALU3 != 0 && QSB_FIN_WMIX_ALU3 != 1
+#error "QSB_FIN_WMIX_ALU3 must be 0 or 1"
+#endif
+#if QSB_FIN_WMIX_ALU3
+#define QSB_WMIX_ACC_F(j) \
+    w[j] = w[j] + QSB_s1M(w[((j)+14)&15]) + w[((j)+9)&15]; \
+    w[j] = qsb_fadd(w[j], one, QSB_s0M(w[((j)+1)&15]));
+#else
+#define QSB_WMIX_ACC_F(j) \
     w[j] = qsb_fadd(w[j], one, QSB_s1M(w[((j)+14)&15])); \
     w[j] = qsb_fadd(w[j], one, w[((j)+9)&15]); \
-    w[j] = qsb_fadd(w[j], one, QSB_s0M(w[((j)+1)&15])); \
+    w[j] = qsb_fadd(w[j], one, QSB_s0M(w[((j)+1)&15]));
+#endif
+#define QSB_STEPL_F(j, a,b,c,d,e,f,g,h, base) do { \
+    QSB_WMIX_ACC_F(j) \
     QSB_RL_F(a,b,c,d,e,f,g,h,QSB_KWF(qsb_klit((base)+(j)), w[j])); \
 } while (0)
 #define QSB_INTERLEAVED15L_F(base) do { \
