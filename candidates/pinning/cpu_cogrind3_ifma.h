@@ -338,7 +338,9 @@ static QI_FN void ec_batch(worker_t *w, vstate *vs) {
             vfe xT, dx; gather_x(&xT, e);
             fsub(&dx, &xT, &px[b]); fwk(&dx);
             if (zf[b]) fsel(&dx, zmask4(dg + 4 * b), &one, &dx);
-            fmul(&cc[b], b ? &cc[b - 1] : &one, &dx);
+            /* dx is W form; fwk is exactly the remaining fold of 1*dx. */
+            if (b == 0) { cc[b] = dx; fwk(&cc[b]); }
+            else fmul(&cc[b], &cc[b - 1], &dx);
         }
         acc = cc[nb - 1];
     }
@@ -373,7 +375,8 @@ static QI_FN void ec_batch(worker_t *w, vstate *vs) {
             bk_y3(c, py[b], dg + 4 * b, zf[b]);
             if (!last) fw_next(c, Tn, dgn + 4 * b, zfn[b], px[b], one);
             else { fsub(&c.dxn, &xD, &px[b]); fwk(&c.dxn); }
-            fmul(&cc[b], accp, &c.dxn);
+            if (it == 0) { cc[b] = c.dxn; fwk(&cc[b]); }
+            else fmul(&cc[b], accp, &c.dxn);
             accp = &cc[b];
         }
         acc = *accp;

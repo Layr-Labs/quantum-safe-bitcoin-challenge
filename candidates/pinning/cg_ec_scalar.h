@@ -55,7 +55,8 @@ static __attribute__((noinline)) void ec_scalar(worker_t *w, sstate *ss) {
     {
         const uint32_t *dg = w->dig[1];
         const tentry *Tj = T + L.off[1];
-        for (int l = 0; l < 4; l++) memcpy(acc[l], ONE, 32);
+        /* Seed each chain from its first denominator; multiplying by one
+         * returns these same lazy 256-bit words in both scalar backends. */
         for (int b = 0; b < nb; b++) {
             if (b + QSB_CG_PF < nb) for (int l = 0; l < 4; l++) __builtin_prefetch(Tj + (dg[4 * (b + QSB_CG_PF) + l] & QCG_IDXM));
             for (int l = 0; l < 4; l++) {
@@ -63,7 +64,8 @@ static __attribute__((noinline)) void ec_scalar(worker_t *w, sstate *ss) {
                 uint64_t dx[4];
                 if (QCG_ZERO(dg[i])) memcpy(dx, ONE, 32);
                 else F::sub(dx, Tj[dg[i] & QCG_IDXM].x, px[i]);
-                F::mul(acc[l], acc[l], dx);
+                if (b == 0) memcpy(acc[l], dx, 32);
+                else F::mul(acc[l], acc[l], dx);
                 memcpy(cc[i], acc[l], 32);
             }
         }
@@ -78,7 +80,6 @@ static __attribute__((noinline)) void ec_scalar(worker_t *w, sstate *ss) {
         const int last = (s + 1 == nw);
         const uint32_t *dgn = last ? NULL : w->dig[s + 1];
         const tentry *Tn = last ? NULL : T + L.off[s + 1];
-        for (int l = 0; l < 4; l++) memcpy(acc[l], ONE, 32);
         const int step = asc ? -1 : 1;
         int b = asc ? nb - 1 : 0;
         for (int it = 0; it < nb; it++, b += step) {
@@ -119,7 +120,11 @@ static __attribute__((noinline)) void ec_scalar(worker_t *w, sstate *ss) {
                     if (QCG_ZERO(cn)) memcpy(dxn[l], ONE, 32); else F::sub(dxn[l], Tn[cn & QCG_IDXM].x, px[i]);
                 } else F::sub(dxn[l], xD, px[i]);
             }
-            for (int l = 0; l < 4; l++) { F::mul(acc[l], acc[l], dxn[l]); memcpy(cc[4 * b + l], acc[l], 32); }
+            for (int l = 0; l < 4; l++) {
+                if (it == 0) memcpy(acc[l], dxn[l], 32);
+                else F::mul(acc[l], acc[l], dxn[l]);
+                memcpy(cc[4 * b + l], acc[l], 32);
+            }
         }
         asc = !asc;
     }

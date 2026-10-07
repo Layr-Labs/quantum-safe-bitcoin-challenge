@@ -25,7 +25,7 @@ typedef uint64_t fe4_t[4];
 
 struct tb_ctx {
     shared_t *S;
-    fe4_t *kg[QSB_CG_MAXWIN];             /* kg[j][k] = (k+1) G_j, k = 0..TB_R-1 (x,y interleaved: 2 per point) */
+    fe4_t *kg[QSB_CG_MAXWIN];             /* kg[j][k], kg[j][TB_R+k] = x,y of (k+1) G_j; immutable before builder creation. */
     uint64_t seg_first[QSB_CG_MAXWIN + 1];/* prefix count of segments per window */
     std::atomic<uint64_t> next_seg;
     std::atomic<int> bad;
@@ -38,9 +38,10 @@ static void bn_to_w(const BIGNUM *b, uint64_t *w) { uint8_t t[32]; BN_bn2lebinpa
 /* affine (x, y) of k * G_j (+ A if addA) through OpenSSL; k given as BIGNUM scalar of B */
 static int ossl_point(EC_GROUP *grp, BN_CTX *ctx, const BIGNUM *sc, int addA, uint64_t *x, uint64_t *y) {
     int ok = 0;
-    EC_POINT *P = EC_POINT_new(grp), *A = EC_POINT_new(grp);
-    BIGNUM *bx = BN_new(), *by = BN_new(), *ax = BN_new(), *ay = BN_new();
-    if (P && A && bx && by && ax && ay && EC_POINT_mul(grp, P, sc, NULL, NULL, ctx)) {
+    EC_POINT *P = EC_POINT_new(grp), *A = addA ? EC_POINT_new(grp) : NULL;
+    BIGNUM *bx = BN_new(), *by = BN_new();
+    BIGNUM *ax = addA ? BN_new() : NULL, *ay = addA ? BN_new() : NULL;
+    if (P && bx && by && (!addA || (A && ax && ay)) && EC_POINT_mul(grp, P, sc, NULL, NULL, ctx)) {
         ok = 1;
         if (addA) {
             const pinning2_params_t *pp = g_cg->pp;
@@ -101,41 +102,43 @@ template <class F>
 static int build_kg(int j, const uint64_t *gx, const uint64_t *gy) {
     /* kg[k] = (k+1) G, k = 0..TB_R-1, by doubling the known prefix: P[s+k] = P[k] + P[s] */
     fe4_t *X = (fe4_t *)malloc(sizeof(fe4_t) * TB_R), *Y = (fe4_t *)malloc(sizeof(fe4_t) * TB_R);
-    fe4_t *tmp = (fe4_t *)malloc(sizeof(fe4_t) * 3 * TB_R), *qx = (fe4_t *)malloc(sizeof(fe4_t) * TB_R), *qy = (fe4_t *)malloc(sizeof(fe4_t) * TB_R);
+    fe4_t *tmp = (fe4_t *)malloc(sizeof(fe4_t) * 3 * TB_R);
 #if QSB_CG_HIGHFOLD
-    if (!X || !Y || !tmp || !qx || !qy) { free(X); free(Y); free(tmp); free(qx); free(qy); return -1; }
+    if (!X || !Y || !tmp) { free(X); free(Y); free(tmp); return -1; }
 #endif
     int rc = 0;
     memcpy(X[0], gx, 32); memcpy(Y[0], gy, 32);
     for (int s = 1; s < TB_R && rc == 0; s *= 2) {
         const int cnt = (2 * s <= TB_R) ? s : TB_R - s;
         /* (s + k + 1) G = (k + 1) G + s G, k = 0..cnt-1; s G = X[s-1] */
-        rc = batch_add<F>(qx, qy, X, Y, &X[s - 1], &Y[s - 1], 1, cnt, tmp);
-        for (int k = 0; k < cnt && rc == 0; k++) { memcpy(X[s + k], qx[k], 32); memcpy(Y[s + k], qy[k], 32); }
+        /* The new suffix [s,s+cnt) is disjoint from both the known prefix
+         * [0,cnt) and the fixed point s-1. Write it in place. */
+        rc = batch_add<F>(X + s, Y + s, X, Y, &X[s - 1], &Y[s - 1], 1, cnt, tmp);
     }
 #if QSB_CG_HIGHFOLD
-    if (rc) { free(X); free(Y); free(tmp); free(qx); free(qy); return rc; }
+    if (rc) { free(X); free(Y); free(tmp); return rc; }
 #endif
     fe4_t *kg = (fe4_t *)malloc(sizeof(fe4_t) * 2 * TB_R);
 #if QSB_CG_HIGHFOLD
-    if (!kg) { free(X); free(Y); free(tmp); free(qx); free(qy); return -1; }
+    if (!kg) { free(X); free(Y); free(tmp); return -1; }
 #endif
-    for (int k = 0; k < TB_R; k++) { memcpy(kg[2 * k], X[k], 32); memcpy(kg[2 * k + 1], Y[k], 32); }
+    memcpy(kg, X, sizeof(fe4_t) * TB_R);
+    memcpy(kg + TB_R, Y, sizeof(fe4_t) * TB_R);
     g_tb.kg[j] = kg;
-    free(X); free(Y); free(tmp); free(qx); free(qy);
+    free(X); free(Y); free(tmp);
     return rc;
 }
 
 template <class F>
 static int build_segment(int j, uint64_t seg, EC_GROUP *grp, BN_CTX *ctx, const BIGNUM *nri, const BIGNUM *order, BIGNUM *sc,
-                         fe4_t *rowx, fe4_t *rowy, fe4_t *nx, fe4_t *ny, fe4_t *kx, fe4_t *ky, fe4_t *tmp) {
+                         fe4_t *rowx, fe4_t *rowy, fe4_t *tmp) {
     shared_t *S = g_cg;
     const layout_t &L = S->lay;
     const uint64_t e0 = seg * QSB_CG_SEG;
     const uint64_t ne = (L.cnt[j] - e0 < QSB_CG_SEG) ? L.cnt[j] - e0 : QSB_CG_SEG;
     tentry *out = S->table + L.off[j] + e0;
-    const fe4_t *kg = g_tb.kg[j];
-    for (int k = 0; k < TB_R; k++) { memcpy(kx[k], kg[2 * k], 32); memcpy(ky[k], kg[2 * k + 1], 32); }
+    /* Published before table_helper and its builders are created; read only. */
+    const fe4_t *kx = g_tb.kg[j], *ky = kx + TB_R;
 #if QSB_CG_HIGHFOLD
     const int row_count = (int)(ne < TB_R ? ne : TB_R);
     /* Only construct required records, including the one-entry final high segment. */
@@ -157,11 +160,11 @@ static int build_segment(int j, uint64_t seg, EC_GROUP *grp, BN_CTX *ctx, const 
         fe4_t px[1], py[1]; memcpy(px[0], sx, 32); memcpy(py[0], sy, 32);
         /* start + (k) G = start + kg[k-1], k = 1..TB_R-1 */
 #if QSB_CG_HIGHFOLD
-        for (int k = 1; k < row_count; k++) { memcpy(nx[k - 1], sx, 32); memcpy(ny[k - 1], sy, 32); }
-        if (row_count > 1 && batch_add<F>(rowx + 1, rowy + 1, nx, ny, kx, ky, 0, row_count - 1, tmp)) return -1;
+        for (int k = 1; k < row_count; k++) { memcpy(rowx[k], sx, 32); memcpy(rowy[k], sy, 32); }
+        if (row_count > 1 && batch_add<F>(rowx + 1, rowy + 1, rowx + 1, rowy + 1, kx, ky, 0, row_count - 1, tmp)) return -1;
 #else
-        for (int k = 1; k < TB_R; k++) { memcpy(nx[k - 1], sx, 32); memcpy(ny[k - 1], sy, 32); }
-        if (batch_add<F>(rowx + 1, rowy + 1, nx, ny, kx, ky, 0, TB_R - 1, tmp)) return -1;
+        for (int k = 1; k < TB_R; k++) { memcpy(rowx[k], sx, 32); memcpy(rowy[k], sy, 32); }
+        if (batch_add<F>(rowx + 1, rowy + 1, rowx + 1, rowy + 1, kx, ky, 0, TB_R - 1, tmp)) return -1;
 #endif
     }
     uint64_t done = 0;
@@ -171,8 +174,10 @@ static int build_segment(int j, uint64_t seg, EC_GROUP *grp, BN_CTX *ctx, const 
         done += take;
         if (done >= ne) break;
         /* next row: + TB_R G_j = kg[TB_R-1] */
-        if (batch_add<F>(nx, ny, rowx, rowy, &kx[TB_R - 1], &ky[TB_R - 1], 1, TB_R, tmp)) return -1;
-        memcpy(rowx, nx, sizeof(fe4_t) * TB_R); memcpy(rowy, ny, sizeof(fe4_t) * TB_R);
+        /* batch_add consumes the complete denominator/prefix pass first,
+         * then reads only P[i] before writing R[i]. Q and tmp are disjoint.
+         * Reuse the current private row without a second row allocation. */
+        if (batch_add<F>(rowx, rowy, rowx, rowy, &kx[TB_R - 1], &ky[TB_R - 1], 1, TB_R, tmp)) return -1;
     }
     return 0;
 }
@@ -186,7 +191,7 @@ static void *builder_main_t(void *arg) {
     EC_GROUP *grp = EC_GROUP_new_by_curve_name(NID_secp256k1);
     BN_CTX *ctx = BN_CTX_new();
     BIGNUM *nri = BN_new(), *order = BN_new(), *sc = BN_new();
-    fe4_t *buf = (fe4_t *)malloc(sizeof(fe4_t) * TB_R * 9);
+    fe4_t *buf = (fe4_t *)malloc(sizeof(fe4_t) * TB_R * 5);
     if (!grp || !ctx || !nri || !order || !sc || !buf) { g_tb.bad.store(1); return NULL; }
     EC_GROUP_get_order(grp, order, ctx);
     BN_lebin2bn(S->pp->neg_r_inv, 32, nri);
@@ -196,7 +201,7 @@ static void *builder_main_t(void *arg) {
         if (s >= total || g_tb.bad.load() || S->stop.load()) break;
         int j = 0; while (s >= g_tb.seg_first[j + 1]) j++;
         if (build_segment<F>(j, s - g_tb.seg_first[j], grp, ctx, nri, order, sc,
-                             buf, buf + TB_R, buf + 2 * TB_R, buf + 3 * TB_R, buf + 4 * TB_R, buf + 5 * TB_R, buf + 6 * TB_R))
+                             buf, buf + TB_R, buf + 2 * TB_R))
             g_tb.bad.store(1);
     }
     free(buf); BN_free(nri); BN_free(order); BN_free(sc); BN_CTX_free(ctx); EC_GROUP_free(grp);
