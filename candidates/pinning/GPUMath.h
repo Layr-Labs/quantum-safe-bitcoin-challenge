@@ -20,6 +20,7 @@
 // 256(+64) bits integer CUDA libray for SECPK1
 // ---------------------------------------------------------------------------------
 
+
 #define GRP_SIZE (1024*2)
 
 #define HSIZE ((GRP_SIZE / 2) - 1)
@@ -75,38 +76,15 @@
 #ifndef QSB_CHAIN_ALU
 #define QSB_CHAIN_ALU 0
 #endif
-
-#ifndef QSB_TRIP_CAP_IADD3
-#define QSB_TRIP_CAP_IADD3 1
-#endif
-
-#ifndef QSB_TRIP_IMAD_ALU
-#define QSB_TRIP_IMAD_ALU 1
-#endif
-#if QSB_TRIP_IMAD_ALU
-#define QIA_DECL "\n.reg .u32 iaz;\nld.const.u32 iaz, [pin_zero_add];"
-#if QSB_TRIP_IMAD_ALU & 2
-#define QIA_Z "iaz"
-#else
-#define QIA_Z "0"
-#endif
-#define QIA_ADD(r) " add.u32 " r "," r ",iaz;"
-#else
-#define QIA_DECL ""
-#define QIA_Z "0"
-#define QIA_ADD(r) ""
-#endif
-#define QSB_CZ_DECL ""
 #if QSB_CHAIN_ALU
 #define QZ "qz"
-#define QZ_DECL "\n\t.reg .u32 qz;\n\tld.const.u32 qz, [pin_zero_add];" QSB_CZ_DECL
+#define QZ_DECL "\n\t.reg .u32 qz;\n\tld.const.u32 qz, [pin_zero_add];"
 #define QZ_ADD(r) "\n\tadd.u32 " r ", " r ", qz;"
 #else
 #define QZ "0"
-#define QZ_DECL QSB_CZ_DECL
+#define QZ_DECL ""
 #define QZ_ADD(r) ""
 #endif
-#define QSB_CZ QZ
 #ifndef QSB_CARRY62
 #define QSB_CARRY62 1
 #endif
@@ -116,9 +94,9 @@
 #if QSB_C31 && QSB_SHORT_CARRY
 #define QSB_SECOND_FOLD_TAIL ""
 #elif QSB_CARRY62 && QSB_SHORT_CARRY
-#define QSB_SECOND_FOLD_TAIL "\taddc.u32 z3, z3, " QSB_CZ ";\n"
+#define QSB_SECOND_FOLD_TAIL "\taddc.u32 z3, z3, " QZ ";\n"
 #else
-#define QSB_SECOND_FOLD_TAIL "\taddc.cc.u32 z3, z3, 0;\n\taddc.u32 z4, z4, " QSB_CZ ";\n"
+#define QSB_SECOND_FOLD_TAIL "\taddc.cc.u32 z3, z3, 0;\n\taddc.u32 z4, z4, " QZ ";\n"
 #endif
 #if QSB_CARRY62 != 0 && QSB_CARRY62 != 1
 #error QSB_CARRY62 must be 0 or 1
@@ -301,7 +279,7 @@
  * consumer byte for byte, independently of each other. */
 #if QSB_MUL_FOLD8_CUT && QSB_SHORT_CARRY
 #define QSB_MUL_F8_CAP ""
-#define QSB_MUL_Z8 "\taddc.u32 z8, " QSB_CZ ", w7;\n"
+#define QSB_MUL_Z8 "\taddc.u32 z8, " QZ ", w7;\n"
 #else
 #define QSB_MUL_F8_CAP "\taddc.u32 f8, 0, 0;\n"
 #define QSB_MUL_Z8 "\taddc.u32 z8, f8, w7;" QZ_ADD("z8") "\n"
@@ -396,6 +374,7 @@
 
 #define MM64 0xD838091DD2253531ULL
 
+
 // We need 1 extra block for ModInv
 #define NBBLOCK 5
 #define BIFULLSIZE 40
@@ -427,6 +406,7 @@
 // SECPK1 endomorphism constants
 //__device__ __constant__ uint64_t _beta[] = { 0xC1396C28719501EEULL, 0x9CF0497512F58995ULL, 0x6E64479EAC3434E9ULL, 0x7AE96A2B657C0710ULL };
 //__device__ __constant__ uint64_t _beta2[] = { 0x3EC693D68E6AFA40ULL, 0x630FB68AED0A766AULL, 0x919BB86153CBCB16ULL, 0x851695D49A83F8EFULL };
+
 
 // ---------------------------------------------------------------------------------------
 
@@ -753,7 +733,7 @@ __device__ __forceinline__ void _ModSub256(uint64_t *r,uint64_t *b) { _ModSub256
 /* QSB_SUB_CUT: r = a - b; on a borrow (m = -1) the low word adds m*977 and the high word adds m. */
 __device__ __forceinline__ void _ModSub256C(uint64_t *r, const uint64_t *a, const uint64_t *b) {
     uint64_t r0,r1,r2,r3;
-    asm("{" QIA_DECL "\n.reg .u64 t0,t1,t2,t3;\n.reg .u32 m,l0,h0;\nsub.cc.u64 t0,%4,%8;\nsubc.cc.u64 t1,%5,%9; subc.cc.u64 t2,%6,%10; subc.cc.u64 t3,%7,%11;\nsubc.u32 m," QIA_Z ",0;\nmov.b64 {l0,h0},t0;\nmad.lo.u32 l0,m,977,l0; add.u32 h0,h0,m;" QIA_ADD("h0") "\nmov.b64 t0,{l0,h0};\nmov.u64 %0,t0; mov.u64 %1,t1; mov.u64 %2,t2; mov.u64 %3,t3;\n}"
+    asm("{\n.reg .u64 t0,t1,t2,t3;\n.reg .u32 m,l0,h0;\nsub.cc.u64 t0,%4,%8;\nsubc.cc.u64 t1,%5,%9; subc.cc.u64 t2,%6,%10; subc.cc.u64 t3,%7,%11;\nsubc.u32 m,0,0;\nmov.b64 {l0,h0},t0;\nmad.lo.u32 l0,m,977,l0; add.u32 h0,h0,m;\nmov.b64 t0,{l0,h0};\nmov.u64 %0,t0; mov.u64 %1,t1; mov.u64 %2,t2; mov.u64 %3,t3;\n}"
         : "=l"(r0),"=l"(r1),"=l"(r2),"=l"(r3)
         : "l"(a[0]),"l"(a[1]),"l"(a[2]),"l"(a[3]),"l"(b[0]),"l"(b[1]),"l"(b[2]),"l"(b[3]));
     r[0]=r0;r[1]=r1;r[2]=r2;r[3]=r3;
@@ -833,7 +813,7 @@ __device__ __forceinline__ void _ModAddLazyOff(uint64_t *r, const uint64_t *a, c
     uint64_t r0,r1,r2,r3;
 #if QSB_CARRY_GLUE && QSB_ADDOFF_CUT
     /* mk = k-1 without touching CF (still k): l0 + mk*0x3D0 + k, h0 + mk. */
-    asm("{" QIA_DECL "\n.reg .u64 t0,t1,t2,t3;\n.reg .u32 mk,l0,h0;\nadd.cc.u64 t0,%4,%8;\naddc.cc.u64 t1,%5,%9; addc.cc.u64 t2,%6,%10; addc.cc.u64 t3,%7,%11;\naddc.u32 mk," QIA_Z ",0xFFFFFFFF;\nmov.b64 {l0,h0},t0;\nmadc.lo.u32 l0,mk,0x3D0,l0; add.u32 h0,h0,mk;" QIA_ADD("h0") "\nmov.b64 t0,{l0,h0};\nmov.u64 %0,t0; mov.u64 %1,t1; mov.u64 %2,t2; mov.u64 %3,t3;\n}"
+    asm("{\n.reg .u64 t0,t1,t2,t3;\n.reg .u32 mk,l0,h0;\nadd.cc.u64 t0,%4,%8;\naddc.cc.u64 t1,%5,%9; addc.cc.u64 t2,%6,%10; addc.cc.u64 t3,%7,%11;\naddc.u32 mk,0xFFFFFFFF,0;\nmov.b64 {l0,h0},t0;\nmadc.lo.u32 l0,mk,0x3D0,l0; add.u32 h0,h0,mk;\nmov.b64 t0,{l0,h0};\nmov.u64 %0,t0; mov.u64 %1,t1; mov.u64 %2,t2; mov.u64 %3,t3;\n}"
 #elif QSB_CARRY_GLUE
     asm("{\n.reg .u64 t0,t1,t2,t3;\n.reg .u32 kk,mk,clo,chi,l0,h0,l1,h1;\nadd.cc.u64 t0,%4,%8;\naddc.cc.u64 t1,%5,%9; addc.cc.u64 t2,%6,%10; addc.cc.u64 t3,%7,%11;\naddc.u32 mk,0xFFFFFFFF,0; and.b32 clo,mk,0xFFFFFC30; and.b32 chi,mk,0xFFFFFFFE;\nmov.b64 {l0,h0},t0; mov.b64 {l1,h1},t1;\naddc.cc.u32 l0,l0,clo; addc.cc.u32 h0,h0,chi; addc.cc.u32 l1,l1,mk; addc.u32 h1,h1,mk;\nmov.b64 t0,{l0,h0}; mov.b64 t1,{l1,h1};\nmov.u64 %0,t0; mov.u64 %1,t1; mov.u64 %2,t2; mov.u64 %3,t3;\n}"
 #else
@@ -1009,6 +989,7 @@ __device__ void _DivStep62(uint64_t u[5], uint64_t v[5],
                            int64_t *vu, int64_t *vv)
 {
 
+
     // u' = (uu*u + uv*v) >> bitCount
     // v' = (vu*u + vv*v) >> bitCount
     // Do not maintain a matrix for r and s, the number of
@@ -1047,6 +1028,7 @@ __device__ void _DivStep62(uint64_t u[5], uint64_t v[5],
         }
 
     }
+
 
     while (true) {
 
@@ -1277,12 +1259,6 @@ __device__ __noinline__ void _ModInv(uint64_t *R)
 // extreme operand (2^-23), which is two million times more likely and is not admissible here.
 // The host transcription is intentionally left exact, so the two are no longer bit-identical.
 #if QSB_SHORT_CARRY
-#if QSB_TRIP_CAP_IADD3 && !QSB_CHAIN_ALU
-#undef QSB_CZ
-#undef QSB_CZ_DECL
-#define QSB_CZ "mz"
-#define QSB_CZ_DECL "\n\t.reg .u32 mz;\n\tld.const.u32 mz, [pin_zero_add];"
-#endif
 __device__ __forceinline__ void _ModMultCore(uint64_t *r, const uint64_t *a, const uint64_t *b)
 {
 #ifdef __CUDA_ARCH__
@@ -1428,12 +1404,6 @@ __device__ __forceinline__ void _ModMultCore(uint64_t *r, const uint64_t *a, con
 #undef QSB_MW
 #endif
 }
-#if QSB_TRIP_CAP_IADD3 && !QSB_CHAIN_ALU
-#undef QSB_CZ
-#undef QSB_CZ_DECL
-#define QSB_CZ QZ
-#define QSB_CZ_DECL ""
-#endif
 
 #else
 __device__ __forceinline__ void _ModMultCore(uint64_t *r, const uint64_t *a, const uint64_t *b)

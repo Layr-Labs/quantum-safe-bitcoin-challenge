@@ -217,9 +217,6 @@ __device__ __forceinline__ void qsb_packed_prepare(
 #if QSB_FIN_SUMU && !(QSB_FIN_MLATE && QSB_PARITY_SUM && QSB_FIN_RAWS)
 #error "QSB_FIN_SUMU re-derives m through QSB_FIN_MLATE"
 #endif
-#if QSB_STATE_LNUM && !(QSB_FIN_SUMU && QSB_LAZY_REC)
-#error "QSB_STATE_LNUM is written for the QSB_FIN_SUMU / QSB_LAZY_REC finish"
-#endif
 __device__ __forceinline__ uint32_t qsb_packed_finish(
     const uint64_t *vbar,const uint64_t *tbar,const uint64_t *root_inv,
     const uint64_t *weighted_inv,
@@ -230,27 +227,14 @@ __device__ __forceinline__ uint32_t qsb_packed_finish(
      * accept any representative in [0,2^256); only x1/x2 (hashed) and the parity inputs
      * need [0,p). So u and v stay raw and m, sum use the carry-folding lazy add
      * (congruent, [0,2^256); a second carry needs a 2^-223 input, as in the chain). */
-#if QSB_FIN_SUMU && QSB_WROOT_DBL
-    QSB_FIN_RAW_MUL(sum,tbar,weighted_inv);
-#else
     QSB_FIN_RAW_MUL(u,tbar,weighted_inv);
-#endif
 #if QSB_FIN_SUMU
-#if !QSB_WROOT_DBL
     QSB_FIN_ADDL(sum,u,u);
-#endif
-#if QSB_STATE_LNUM
-#if !QSB_NEG_Y_MAC
-#error "QSB_STATE_LNUM stores the numerator of l = u + v (QSB_NEG_Y_MAC)"
-#endif
-    QSB_FIN_RAW_MUL(l,vbar,root_inv);
-#else
     QSB_FIN_RAW_MUL(v,vbar,root_inv);
 #if QSB_NEG_Y_MAC
     QSB_FIN_ADDL(l,u,v);
 #else
     QSB_FIN_SUB(l,u,v);
-#endif
 #endif
 #else
     QSB_FIN_RAW_MUL(v,vbar,root_inv);
