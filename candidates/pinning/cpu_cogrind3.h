@@ -195,6 +195,7 @@ struct worker_t {
     alignas(64) uint32_t dig[QSB_CG_MAXWIN][QSB_CG_BMAX + 32];
     uint8_t zf[QSB_CG_MAXWIN][QSB_CG_BMAX / 4 + 8];
     EC_GROUP *grp; BN_CTX *ctx; BIGNUM *order, *nri, *rx, *ry; EC_POINT *Ru2;
+    qsb_hit_point_pool *hit_points; /* borrowed only by this worker thread */
 };
 
 /* A tentative CPU hit: re-derive (sequence, locktime, recid) with the exact OpenSSL gate and
@@ -203,7 +204,7 @@ static void publish(worker_t *w, int i, int recid) {
     shared_t *S = g_cg;
     S->tentative.fetch_add(1, std::memory_order_relaxed);
     const uint32_t lt = w->lt0 + (uint32_t)i;
-    if (qsb_host_exact_hit(S->pp, w->seq, lt, recid, w->grp, w->ctx, w->order, w->nri, w->Ru2)) {
+    if (qsb_host_exact_hit(S->pp, w->seq, lt, recid, w->grp, w->ctx, w->order, w->nri, w->Ru2, false, w->hit_points)) {
         char line[96];
         int wl = snprintf(line, sizeof line, "sequence=%u locktime=%u recid=%d\n", w->seq, lt, recid);
         if (write(S->hit_fd, line, (size_t)wl) == wl) S->hits.fetch_add(1, std::memory_order_relaxed);
@@ -544,6 +545,11 @@ static void *worker_main(void *arg) {
         !BN_lebin2bn(S->pp->neg_r_inv, 32, w->nri) || !BN_lebin2bn(S->pp->u2r_x, 32, w->rx) ||
         !BN_lebin2bn(S->pp->u2r_y, 32, w->ry) ||
         !EC_POINT_set_affine_coordinates(w->grp, w->Ru2, w->rx, w->ry, w->ctx)) { S->failed.store(1); return NULL; }
+    /* The automatic pool outlives all calibration/search calls to publish.
+     * No signed-point cache or joint EC path is enabled here. Allocation
+     * failure leaves the exact gate's original per-attempt fallback. */
+    qsb_hit_point_pool worker_hit_points(w->grp);
+    w->hit_points = &worker_hit_points;
     void *vs = NULL;
 #if QSB_CG_HAVE_SIMD
     if (S->has_avx2) vs = aligned_alloc(64, (sizeof(v4::vstate) + 63) & ~(size_t)63);

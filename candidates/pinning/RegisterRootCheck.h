@@ -51,7 +51,8 @@ static bool qsb_register_startup_check(uint64_t *device, cudaStream_t stream) {
                 v=(v^(v>>30))*0xbf58476d1ce4e5b9ULL;v^=v>>27;
                 raw[(side*256u+f)*4+k]=f<64?edges[side?f%8:f/8][k]:v;
             }
-        error=cudaMemcpyAsync(device,raw,words*sizeof(uint64_t),cudaMemcpyHostToDevice,stream);
+        /* All 512 field inputs; output and unused rows need no input copy. */
+        error=cudaMemcpyAsync(device,raw,512u*32u,cudaMemcpyHostToDevice,stream);
         if(error==cudaSuccess){
             if(qsb_carrier_has(QK_PFC))
                 qsb_carrier_launch(qsb_prefix_field_check_kernel,QK_PFC,dim3(16),dim3(128),stream,
@@ -60,7 +61,8 @@ static bool qsb_register_startup_check(uint64_t *device, cudaStream_t stream) {
                 qsb_prefix_field_check_kernel<<<16,128,0,stream>>>((uint32_t*)device);
             error=cudaGetLastError();
         }
-        if(error==cudaSuccess)error=cudaMemcpyAsync(got,device,words*sizeof(uint64_t),cudaMemcpyDeviceToHost,stream);
+        /* Keep the original got offsets and compare every one of 256 outputs. */
+        if(error==cudaSuccess)error=cudaMemcpyAsync(got+512u*4u,device+512u*4u,256u*32u,cudaMemcpyDeviceToHost,stream);
         if(error==cudaSuccess)error=cudaStreamSynchronize(stream);
         for(unsigned f=0;f<256&&ok&&error==cudaSuccess;++f){
             ok=BN_lebin2bn((const unsigned char*)(raw+f*4),32,a)!=nullptr &&
@@ -98,7 +100,9 @@ static bool qsb_register_startup_check(uint64_t *device, cudaStream_t stream) {
                     for(int k=1;k<4;++k)raw[(size_t)i*4+k]=~0ULL;}
             }
         }
-        error=cudaMemcpyAsync(device,raw,words*sizeof(uint64_t),cudaMemcpyHostToDevice,stream);
+        /* Guarded input loads read count rows. Scratch is written by the
+         * kernel before it is read; its full allocation is retained. */
+        error=cudaMemcpyAsync(device,raw,(size_t)count*32u,cudaMemcpyHostToDevice,stream);
         if(error==cudaSuccess){
             if(qsb_carrier_has(QK_RR))
                 qsb_carrier_launch(qsb_root_register,QK_RR,dim3(1),dim3(QSB_RROOT_LANES),stream,device,count);
@@ -106,7 +110,8 @@ static bool qsb_register_startup_check(uint64_t *device, cudaStream_t stream) {
                 qsb_root_register<<<1,QSB_RROOT_LANES,0,stream>>>(device,count);
             error=cudaGetLastError();
         }
-        if(error==cudaSuccess)error=cudaMemcpyAsync(got,device,words*sizeof(uint64_t),cudaMemcpyDeviceToHost,stream);
+        /* Both complete output planes, including every partial-tile row. */
+        if(error==cudaSuccess)error=cudaMemcpyAsync(got,device,(size_t)count*64u,cudaMemcpyDeviceToHost,stream);
         if(error==cudaSuccess)error=cudaStreamSynchronize(stream);
         if(error!=cudaSuccess)break;
         for(int i=0;i<count&&ok;++i){
