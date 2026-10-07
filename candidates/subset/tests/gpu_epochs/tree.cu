@@ -1010,6 +1010,24 @@ static int qsb_rf_grid_n = 0;              /* host: the persistent grid (set fro
 #ifndef QSB_SHA_WROLL_PIPE
 #define QSB_SHA_WROLL_PIPE 0
 #endif
+#ifndef QSB_WINDOW_ROW_PAD
+#define QSB_WINDOW_ROW_PAD 1
+#endif
+#if QSB_WINDOW_ROW_PAD != 0 && QSB_WINDOW_ROW_PAD != 1 && QSB_WINDOW_ROW_PAD != 8
+#error "QSB_WINDOW_ROW_PAD must be 0, 1 or 8"
+#endif
+#if QSB_WINDOW_ROW_PAD && (!QSB_SHA_SCHED_V4 || QSB_SHA_WROLL_PIPE)
+#error "QSB_WINDOW_ROW_PAD needs vector schedule and non-pipelined window path"
+#endif
+#ifndef QSB_WINDOW_GROUP_ROUNDS
+#define QSB_WINDOW_GROUP_ROUNDS 16
+#endif
+#if QSB_WINDOW_GROUP_ROUNDS != 0 && QSB_WINDOW_GROUP_ROUNDS != 8 && QSB_WINDOW_GROUP_ROUNDS != 16 && QSB_WINDOW_GROUP_ROUNDS != 32
+#error "QSB_WINDOW_GROUP_ROUNDS must be 0, 8, 16 or 32"
+#endif
+#if QSB_WINDOW_GROUP_ROUNDS && (!ZLAB_DUAL_EPOCH_SHA || !QSB_SHA_SCHED_V4 || QSB_SHA_WROLL_PIPE)
+#error "QSB_WINDOW_GROUP_ROUNDS needs paired vector schedules and QSB_SHA_WROLL_PIPE=0"
+#endif
 #ifndef QSB_DIVSTEP_4LANE
 #define QSB_DIVSTEP_4LANE 1
 #endif
@@ -5987,7 +6005,7 @@ static void qsb_table_l2_window(cudaStream_t *streams, int n_streams,
 #else
 #define QSB_K16_CODE_ROLL
 #endif
-#define QSB_CARRIER_KNOBS_16 QSB_SYS_KNOBS QSB_LEA_KNOBS QSB_K16_POOL_RCONST QSB_K16_EC_PSI_ZZ QSB_ROOT_LANE_KNOBS QSB_K16_LOSS QSB_XSHA_KNOBS QSB_K16_FOLD_REG QSB_K16_YP_DC QSB_K16_CODE_ROLL
+#define QSB_CARRIER_KNOBS_16 QSB_SYS_KNOBS QSB_CARRIER_KV(QSB_WINDOW_GROUP_ROUNDS) QSB_CARRIER_KV(QSB_WINDOW_ROW_PAD) QSB_LEA_KNOBS QSB_K16_POOL_RCONST QSB_K16_EC_PSI_ZZ QSB_ROOT_LANE_KNOBS QSB_K16_LOSS QSB_XSHA_KNOBS QSB_K16_FOLD_REG QSB_K16_YP_DC QSB_K16_CODE_ROLL
 #ifdef QSB_CARRIER_BUILD   /* only the image carries it; the host keeps the string */
 __device__ __constant__ char qsb_carrier_knobs[] = QSB_CARRIER_KNOBS;
 #endif
