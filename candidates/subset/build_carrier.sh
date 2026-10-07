@@ -75,9 +75,10 @@ if knob_on("QSB_GATE_FMA_RT") and not re.search(r"\bQSB_GATE_FMA_C\b", syms):
     sys.exit("build_carrier: QSB_GATE_FMA_RT image without the QSB_GATE_FMA_C global (the host clear would be skipped)")
 if knob_on("QSB_CONST_CALLEE"):
     n_ur = dig[0].count("c[0x3][UR")
-    if n_ur != 16:
+    n_want = 32 if knob_on("QSB_SX_CC_FLAT") else 16   # sx: QSB_SX_CC_FLAT writes each block's 16 row loads out
+    if n_ur != n_want:
         sys.exit(f"build_carrier: QSB_CONST_CALLEE image has {n_ur} UR-indexed c[0x3] loads in kernel_digest, "
-                 "want 16 (the K+W walk fell back to per-lane LDC)")
+                 f"want {n_want} (the K+W walk fell back to per-lane LDC)")
     print(f"QSB_CONST_CALLEE gate: {n_ur} UR-indexed c[0x3] loads in kernel_digest")
 b64 = base64.b64encode(img).decode()
 lines = [b64[i:i + 120] for i in range(0, len(b64), 120)]
