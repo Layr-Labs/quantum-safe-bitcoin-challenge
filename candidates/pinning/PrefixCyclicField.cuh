@@ -2,6 +2,12 @@
 /* Python-validated integration, no native compilation or GPU execution. Four fields per warp. */
 /* Include after CyclicField.cuh for its full-carry normalize8 helper. */
 #pragma once
+#ifndef QSB_PREFIX_CARRY_PACK
+#define QSB_PREFIX_CARRY_PACK 1
+#endif
+#if QSB_PREFIX_CARRY_PACK != 0 && QSB_PREFIX_CARRY_PACK != 1
+#error "QSB_PREFIX_CARRY_PACK must be 0 or 1"
+#endif
 namespace qsb_prefix_cyclic_research {
 constexpr unsigned full=0xffffffffu;
 
@@ -39,22 +45,41 @@ __device__ __forceinline__ uint32_t multiply8(uint32_t a,uint32_t b,unsigned lan
             : "l"(product),"r"(d),"r"(i));
     }
     uint64_t upper;
+#if QSB_PREFIX_CARRY_PACK
+    // counts = 256*L + T; upper's carry U = T-L-borrow is in [0,7].
+    // Subtracting L and the low-64 borrow keeps L in the next byte exactly.
+    uint32_t packed;
+    const uint32_t lower_count=(counts>>8)&255u;
+    asm("{ sub.cc.u64 %0, %2, %3;\n\tsubc.u32 %1, %4, %5; }"
+        : "=&l"(upper),"=r"(packed)
+        : "l"(total),"l"(prefix),"r"(counts),"r"(lower_count));
+#else
     uint32_t upper_count;
     const uint32_t lower_count=(counts>>8)&255u,total_count=counts&255u;
     asm("{ sub.cc.u64 %0, %2, %3;\n\tsubc.u32 %1, %4, %5; }"
         : "=l"(upper),"=r"(upper_count)
         : "l"(total),"l"(prefix),"r"(total_count),"r"(lower_count));
+#endif
     const uint32_t lo0=(uint32_t)prefix,lo1=(uint32_t)(prefix>>32);
     const uint32_t hi0=(uint32_t)upper,hi1=(uint32_t)(upper>>32);
     const uint32_t lp1=__shfl_up_sync(full,lo1,1,8);
     const uint32_t hp1=__shfl_up_sync(full,hi1,1,8);
     const uint32_t llast=__shfl_sync(full,lo1,7,8);
+#if QSB_PREFIX_CARRY_PACK
+    // All three old carry sources select (d-2) mod 8 when they are used.
+    // For d<2 the high half wraps the LOW convolution's carry, not U.
+    const uint32_t carry2=__shfl_sync(full,packed,(6u+d)&7u,8);
+    const uint32_t lower2=carry2>>8,upper2=carry2&255u;
+    const uint64_t low=(uint64_t)lo0+(d?lp1:0u)+(d>=2?lower2:0u);
+    const uint64_t high=(uint64_t)hi0+(d?hp1:llast)+(d>=2?upper2:lower2);
+#else
     const uint32_t lp2=__shfl_up_sync(full,lower_count,2,8);
     const uint32_t hp2=__shfl_up_sync(full,upper_count,2,8);
     const uint32_t lwrap=__shfl_sync(full,lower_count,(6u+d)&7u,8);
     // A normalized 96-bit column contributes to three adjacent radix words.
     const uint64_t low=(uint64_t)lo0+(d?lp1:0u)+(d>=2?lp2:0u);
     const uint64_t high=(uint64_t)hi0+(d?hp1:llast)+(d>=2?hp2:lwrap);
+#endif
     const uint64_t hp=__shfl_up_sync(full,high,1,8);
     const uint64_t extra=__shfl_sync(full,high,7,8);
     uint64_t column=low+977ull*high+(d?hp:0ull);
