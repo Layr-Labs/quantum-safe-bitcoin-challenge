@@ -240,84 +240,13 @@ static QSB_SHA_AVX2F void s8_compress_mid(v8u out[8], const v8u W[16], const uin
     s8_compress_full(out, W);
 }
 
-#define QSB_SHA_X1 __attribute__((target("avx2,bmi2"), always_inline)) inline
-static QSB_SHA_X1 uint32_t s1_S0(uint32_t a) { return ror32(a, 2) ^ ror32(a, 13) ^ ror32(a, 22); }
-static QSB_SHA_X1 uint32_t s1_S1(uint32_t e) { return ror32(e, 6) ^ ror32(e, 11) ^ ror32(e, 25); }
-static QSB_SHA_X1 uint32_t s1_s0(uint32_t w) { return ror32(w, 7) ^ ror32(w, 18) ^ (w >> 3); }
-static QSB_SHA_X1 uint32_t s1_s1(uint32_t w) { return ror32(w, 17) ^ ror32(w, 19) ^ (w >> 10); }
-#define S1_ROUND(a, b, c, d, e, f, g, h, kw, bc) do {                                        \
-        const uint32_t t1_ = h + s1_S1(e) + (g ^ (e & (f ^ g))) + (kw);                    \
-        const uint32_t ab_ = a ^ b;                                                         \
-        const uint32_t t2_ = s1_S0(a) + ((ab_ & bc) ^ b);                                   \
-        d += t1_; h = t1_ + t2_; bc = ab_;                                                  \
-    } while (0)
-template <uint32_t VM, int H0ONLY>
-static __attribute__((target("avx2,bmi2"), always_inline)) inline void
-s9_compress_plan(v8u out[8], const v8u *Wv, uint32_t sout[8], const uint32_t *Sv, const s8_plan &P) {
-    static_assert(VM & 1, "round 0 folding needs a varying word 0");
-    constexpr uint64_t V = s8_varmask(VM);
-    static_assert((V >> 16) == (~0ull >> 16), "every schedule word must depend on the message");
-    v8u W[64], KW[64];
-    uint32_t SW[64], SKW[64];
-    for (int j = 0; j < 16; j++) { if ((V >> j) & 1) W[j] = Wv[j]; SW[j] = ((V >> j) & 1) ? Sv[j] : 0u; }
-#define S8P_W(t) do {                                                                                     \
-        v8u acc_; int has_ = 0;                                                                           \
-        if ((V >> ((t) - 2)) & 1) { acc_ = s8_s1(W[(t) - 2]); has_ = 1; }                               \
-        if ((V >> ((t) - 7)) & 1) { acc_ = has_ ? s8_add(acc_, W[(t) - 7]) : W[(t) - 7]; has_ = 1; }    \
-        if ((V >> ((t) - 15)) & 1) { const v8u s_ = s8_s0(W[(t) - 15]); acc_ = has_ ? s8_add(acc_, s_) : s_; has_ = 1; } \
-        if ((V >> ((t) - 16)) & 1) { acc_ = has_ ? s8_add(acc_, W[(t) - 16]) : W[(t) - 16]; has_ = 1; } \
-        if (!((((V >> ((t) - 2)) & (V >> ((t) - 7)) & (V >> ((t) - 15)) & (V >> ((t) - 16))) & 1))) acc_ = s8_add(acc_, s8_set1(P.kc[t])); \
-        W[t] = acc_;                                                                                      \
-        SW[t] = s1_s1(SW[(t) - 2]) + SW[(t) - 7] + s1_s0(SW[(t) - 15]) + SW[(t) - 16] + P.kc[t];         \
-    } while (0)
-    S8P_W(16); S8P_W(17); S8P_W(18); S8P_W(19); S8P_W(20); S8P_W(21); S8P_W(22); S8P_W(23);
-    S8P_W(24); S8P_W(25); S8P_W(26); S8P_W(27); S8P_W(28); S8P_W(29); S8P_W(30); S8P_W(31);
-#undef S8P_W
-    for (int t = 32; t < 64; t++) {
-        W[t] = s8_add(s8_add(s8_s1(W[t - 2]), W[t - 7]), s8_add(s8_s0(W[t - 15]), W[t - 16]));
-        SW[t] = s1_s1(SW[t - 2]) + SW[t - 7] + s1_s0(SW[t - 15]) + SW[t - 16];
-    }
-#define S8P_KW(t) KW[t] = ((V >> (t)) & 1) ? s8_add(s8_set1(K256[t]), W[t]) : s8_set1(P.kw[t]); \
-                  SKW[t] = ((V >> (t)) & 1) ? K256[t] + SW[t] : P.kw[t];
-    S8P_KW(1) S8P_KW(2) S8P_KW(3) S8P_KW(4) S8P_KW(5) S8P_KW(6) S8P_KW(7) S8P_KW(8)
-    S8P_KW(9) S8P_KW(10) S8P_KW(11) S8P_KW(12) S8P_KW(13) S8P_KW(14) S8P_KW(15)
-#undef S8P_KW
-    for (int t = 16; t < 64; t++) { KW[t] = s8_add(s8_set1(K256[t]), W[t]); SKW[t] = K256[t] + SW[t]; }
-    v8u a = s8_set1(P.st0[0]), b = s8_set1(P.st0[1]), c = s8_set1(P.st0[2]), d = s8_add(W[0], s8_set1(P.e1c));
-    v8u e = s8_set1(P.st0[4]), f = s8_set1(P.st0[5]), g = s8_set1(P.st0[6]), h = s8_add(W[0], s8_set1(P.a1c));
-    v8u bc = s8_set1(P.st0[0] ^ P.st0[1]);
-    uint32_t sa = P.st0[0], sb = P.st0[1], sc = P.st0[2], sd = SW[0] + P.e1c;
-    uint32_t se = P.st0[4], sf = P.st0[5], sg = P.st0[6], sh = SW[0] + P.a1c;
-    uint32_t sbc = P.st0[0] ^ P.st0[1];
-#define S9_R(A, B, C, D, E, F, G, H, t) \
-    S8_ROUND(A, B, C, D, E, F, G, H, KW[t], bc); S1_ROUND(s##A, s##B, s##C, s##D, s##E, s##F, s##G, s##H, SKW[t], sbc);
-    S9_R(h, a, b, c, d, e, f, g, 1) S9_R(g, h, a, b, c, d, e, f, 2)
-    S9_R(f, g, h, a, b, c, d, e, 3) S9_R(e, f, g, h, a, b, c, d, 4)
-    S9_R(d, e, f, g, h, a, b, c, 5) S9_R(c, d, e, f, g, h, a, b, 6)
-    S9_R(b, c, d, e, f, g, h, a, 7)
-    for (int t = 8; t < 64; t += 8) {
-        S9_R(a, b, c, d, e, f, g, h, t + 0) S9_R(h, a, b, c, d, e, f, g, t + 1)
-        S9_R(g, h, a, b, c, d, e, f, t + 2) S9_R(f, g, h, a, b, c, d, e, t + 3)
-        S9_R(e, f, g, h, a, b, c, d, t + 4) S9_R(d, e, f, g, h, a, b, c, t + 5)
-        S9_R(c, d, e, f, g, h, a, b, t + 6) S9_R(b, c, d, e, f, g, h, a, t + 7)
-    }
-#undef S9_R
-    out[0] = s8_add(s8_set1(P.st0[0]), a); sout[0] = P.st0[0] + sa;
-    if (!H0ONLY) {
-        out[1] = s8_add(s8_set1(P.st0[1]), b); out[2] = s8_add(s8_set1(P.st0[2]), c); out[3] = s8_add(s8_set1(P.st0[3]), d);
-        out[4] = s8_add(s8_set1(P.st0[4]), e); out[5] = s8_add(s8_set1(P.st0[5]), f); out[6] = s8_add(s8_set1(P.st0[6]), g);
-        out[7] = s8_add(s8_set1(P.st0[7]), h);
-        sout[1] = P.st0[1] + sb; sout[2] = P.st0[2] + sc; sout[3] = P.st0[3] + sd;
-        sout[4] = P.st0[4] + se; sout[5] = P.st0[5] + sf; sout[6] = P.st0[6] + sg; sout[7] = P.st0[7] + sh;
-    }
-}
-
 /* byte-swap of each 32-bit lane */
 static QSB_SHA_AVX2 v8u s8_bswap(v8u x) {
     const v8u m = _mm256_setr_epi8(3, 2, 1, 0, 7, 6, 5, 4, 11, 10, 9, 8, 15, 14, 13, 12,
                                    3, 2, 1, 0, 7, 6, 5, 4, 11, 10, 9, 8, 15, 14, 13, 12);
     return _mm256_shuffle_epi8(x, m);
 }
+
 
 /* ---------------- SHA-NI ---------------- */
 #define QSB_SHA_NI __attribute__((target("sha,sse4.1"), always_inline)) inline
@@ -386,57 +315,6 @@ static QSB_SHA_NI void shani_compress2(uint32_t *stA, const uint32_t *wA, uint32
     A0 = _mm_add_epi32(A0, A0s); A1 = _mm_add_epi32(A1, A1s);
     B0 = _mm_add_epi32(B0, B0s); B1 = _mm_add_epi32(B1, B1s);
     shani_store_state(stA, A0, A1); shani_store_state(stB, B0, B1);
-}
-
-static QSB_SHA_NI void shani_h0_4(const uint32_t *w0, const uint32_t *w1, const uint32_t *w2,
-                                  const uint32_t *w3, uint32_t h0[4]) {
-    const uint32_t *w[4] = {w0, w1, w2, w3};
-    __m128i I0, I1;
-    shani_load_state(IV256, I0, I1);
-    __m128i X0[4], X1[4], M0[4], M1[4], M2[4], M3[4], m[4], K;
-    for (int s = 0; s < 4; s++) {
-        X0[s] = I0; X1[s] = I1;
-        M0[s] = _mm_loadu_si128((const __m128i *)(w[s] + 0));
-        M1[s] = _mm_loadu_si128((const __m128i *)(w[s] + 4));
-        M2[s] = _mm_loadu_si128((const __m128i *)(w[s] + 8));
-        M3[s] = _mm_loadu_si128((const __m128i *)(w[s] + 12));
-    }
-#define SHANI4_ROUNDS(g, Mc)                                                           \
-    K = _mm_loadu_si128((const __m128i *)(K256 + 4 * (g)));                            \
-    for (int s = 0; s < 4; s++) {                                                      \
-        m[s] = _mm_add_epi32(Mc[s], K); X1[s] = _mm_sha256rnds2_epu32(X1[s], X0[s], m[s]); }
-#define SHANI4_TAIL()                                                                  \
-    for (int s = 0; s < 4; s++) {                                                      \
-        m[s] = _mm_shuffle_epi32(m[s], 0x0E); X0[s] = _mm_sha256rnds2_epu32(X0[s], X1[s], m[s]); }
-#define SHANI4_MSG2(Mc, Mp, Mn)                                                        \
-    for (int s = 0; s < 4; s++)                                                        \
-        Mn[s] = _mm_sha256msg2_epu32(_mm_add_epi32(Mn[s], _mm_alignr_epi8(Mc[s], Mp[s], 4)), Mc[s]);
-#define SHANI4_MSG1(Mq, Mc)                                                            \
-    for (int s = 0; s < 4; s++) Mq[s] = _mm_sha256msg1_epu32(Mq[s], Mc[s]);
-       SHANI4_ROUNDS(0, M0) SHANI4_TAIL()
-       SHANI4_ROUNDS(1, M1) SHANI4_TAIL() SHANI4_MSG1(M0, M1)
-       SHANI4_ROUNDS(2, M2) SHANI4_TAIL() SHANI4_MSG1(M1, M2)
-       SHANI4_ROUNDS(3, M3) SHANI4_MSG2(M3, M2, M0) SHANI4_TAIL() SHANI4_MSG1(M2, M3)
-       SHANI4_ROUNDS(4, M0) SHANI4_MSG2(M0, M3, M1) SHANI4_TAIL() SHANI4_MSG1(M3, M0)
-       SHANI4_ROUNDS(5, M1) SHANI4_MSG2(M1, M0, M2) SHANI4_TAIL() SHANI4_MSG1(M0, M1)
-       SHANI4_ROUNDS(6, M2) SHANI4_MSG2(M2, M1, M3) SHANI4_TAIL() SHANI4_MSG1(M1, M2)
-       SHANI4_ROUNDS(7, M3) SHANI4_MSG2(M3, M2, M0) SHANI4_TAIL() SHANI4_MSG1(M2, M3)
-       SHANI4_ROUNDS(8, M0) SHANI4_MSG2(M0, M3, M1) SHANI4_TAIL() SHANI4_MSG1(M3, M0)
-       SHANI4_ROUNDS(9, M1) SHANI4_MSG2(M1, M0, M2) SHANI4_TAIL() SHANI4_MSG1(M0, M1)
-      SHANI4_ROUNDS(10, M2) SHANI4_MSG2(M2, M1, M3) SHANI4_TAIL() SHANI4_MSG1(M1, M2)
-      SHANI4_ROUNDS(11, M3) SHANI4_MSG2(M3, M2, M0) SHANI4_TAIL() SHANI4_MSG1(M2, M3)
-      SHANI4_ROUNDS(12, M0) SHANI4_MSG2(M0, M3, M1) SHANI4_TAIL() SHANI4_MSG1(M3, M0)
-      SHANI4_ROUNDS(13, M1) SHANI4_MSG2(M1, M0, M2) SHANI4_TAIL()
-      SHANI4_ROUNDS(14, M2) SHANI4_MSG2(M2, M1, M3) SHANI4_TAIL()
-      SHANI4_ROUNDS(15, M3) SHANI4_TAIL()
-#undef SHANI4_ROUNDS
-#undef SHANI4_TAIL
-#undef SHANI4_MSG2
-#undef SHANI4_MSG1
-    h0[0] = (uint32_t)_mm_extract_epi32(X0[0], 3) + IV256[0];
-    h0[1] = (uint32_t)_mm_extract_epi32(X0[1], 3) + IV256[0];
-    h0[2] = (uint32_t)_mm_extract_epi32(X0[2], 3) + IV256[0];
-    h0[3] = (uint32_t)_mm_extract_epi32(X0[3], 3) + IV256[0];
 }
 /* single compression (tests only) */
 static QSB_SHA_NI void shani_compress1(uint32_t *st, const uint32_t *w) {
