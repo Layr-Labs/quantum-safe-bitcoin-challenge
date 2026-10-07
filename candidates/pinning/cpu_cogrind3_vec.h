@@ -131,6 +131,56 @@ static QV_INL void v29_norm(vfe *r) {
     t8 &= vs1(QV_M24);
     r->n[0] = t0; r->n[1] = t1; r->n[2] = t2; r->n[3] = t3; r->n[4] = t4; r->n[5] = t5; r->n[6] = t6; r->n[7] = t7; r->n[8] = t8;
 }
+/* Weakly normalised inputs need at most one subtraction of p. */
+static QV_INL V v29_ge_p(const vfe *a) {
+    const V M = vs1(QV_M29), one = vs1(1);
+    const V *t = a->n;
+    V m = t[2]; for (int k = 3; k < 8; k++) m &= t[k];
+    return (t[8] >> 24) | ((V)(t[8] == vs1(QV_M24)) & (V)(m == M)
+        & (V)((t[1] + vs1(8ULL) + ((t[0] + vs1(977ULL)) >> 29)) > M) & one);
+}
+static QV_INL void v29_norm_weak(vfe *r) {
+    const V high = (r->n[8] + vs1(1)) >> 24;          /* top < 2^24 - 1 already implies < p */
+    if (__builtin_expect(_mm256_testz_si256((__m256i)high, (__m256i)high), 1)) return;
+    const V M = vs1(QV_M29), x = v29_ge_p(r);
+    V t0 = r->n[0] + VMUL(x, vs1(977ULL)), t1 = r->n[1] + (x << 3);
+    V t2 = r->n[2], t3 = r->n[3], t4 = r->n[4], t5 = r->n[5], t6 = r->n[6], t7 = r->n[7], t8 = r->n[8];
+    t1 += (t0 >> 29); t0 &= M;
+    t2 += (t1 >> 29); t1 &= M;
+    t3 += (t2 >> 29); t2 &= M;
+    t4 += (t3 >> 29); t3 &= M;
+    t5 += (t4 >> 29); t4 &= M;
+    t6 += (t5 >> 29); t5 &= M;
+    t7 += (t6 >> 29); t6 &= M;
+    t8 += (t7 >> 29); t7 &= M;
+    t8 &= vs1(QV_M24);
+    r->n[0] = t0; r->n[1] = t1; r->n[2] = t2; r->n[3] = t3; r->n[4] = t4; r->n[5] = t5; r->n[6] = t6; r->n[7] = t7; r->n[8] = t8;
+}
+/* Subtracting odd p flips bit 0; hashing needs no other bits of canonical y. */
+static QV_INL V v29_parity(const vfe *a) { return (a->n[0] ^ v29_ge_p(a)) & vs1(1); }
+
+/* Hashing needs only canonical y parity: yp is weakly normalised and ymul
+ * is the NORM product before subtracting yp. For d = ymul + 2p - yp,
+ * limbs 0..7 < 3*2^29 + 2^10 and limb 8 < 3*2^24 + 2^10.
+ * Folding x = d8 >> 24 (x <= 3) leaves every carry <= 3. Thus a
+ * masked top limb < 2^24 - 4 guarantees the weak result is < p.
+ * Its parity is (ymul0 ^ yp0 ^ x) & 1, since 2p is even and 977 odd. */
+static QV_INL void v29_pub_parity(V *pp, V *pm, const vfe *yp, const vfe *ymul) {
+    const V top = ymul->n[8] + (vs1(2 * QV_M24) - yp->n[8]);
+    const V high = ((yp->n[8] + vs1(1)) >> 24)
+        | (((top & vs1(QV_M24)) + vs1(4)) >> 24);
+    if (__builtin_expect(_mm256_testz_si256((__m256i)high, (__m256i)high), 1)) {
+        *pp = yp->n[0] & vs1(1);
+        *pm = (ymul->n[0] ^ yp->n[0] ^ (top >> 24)) & vs1(1);
+        return;
+    }
+    /* Rare boundary lanes: preserve the original subtraction and normalisation. */
+    *pp = v29_parity(yp);
+    vfe ym;
+    v29_subm(&ym, ymul, yp, 2);
+    v29_nweak(&ym);
+    *pm = v29_parity(&ym);
+}
 /* r = mask ? a : b (per lane, mask all-ones or zero) */
 static QV_INL void v29_sel(vfe *r, V mask, const vfe *a, const vfe *b) {
     for (int k = 0; k < 9; k++) r->n[k] = (V)_mm256_blendv_epi8((__m256i)b->n[k], (__m256i)a->n[k], (__m256i)mask);
@@ -198,29 +248,98 @@ static QV_INL void vinv(vfe *inv, const vfe *m) {
     v29_mul_o(inv, &t, &oth);
 }
 
+/* Low 32 bits of p and m, in lane order p0,p1,p2,p3,m0,m1,m2,m3. */
+static QV_INL __m256i hash_pack32(V p, V m) {
+    const __m256i t = _mm256_castps_si256(_mm256_shuffle_ps(
+        _mm256_castsi256_ps((__m256i)p), _mm256_castsi256_ps((__m256i)m), 0x88));
+    return _mm256_permute4x64_epi64(t, 0xD8);
+}
+
+/* Pubkey-only compression: retain W, add K at round consumption instead of
+ * materialising and rereading a second 64-vector KW array. */
+static QV_INL __m256i hash_pub8_single_schedule(const qcg_sha::v8u *Wv) {
+    using namespace qcg_sha;
+    const s8_plan &P = S8_PLAN_PUBKEY;
+    constexpr uint64_t V = s8_varmask(0x1FFu);
+    v8u W[64];
+    for (int j = 0; j < 9; j++) W[j] = Wv[j];
+    for (int j = 9; j < 15; j++) W[j] = _mm256_setzero_si256();
+    W[15] = s8_set1(264);
+#define QV_PUB_W(t) do { \
+        v8u acc_; int has_ = 0; \
+        if ((V >> ((t) - 2)) & 1) { acc_ = s8_s1(W[(t) - 2]); has_ = 1; } \
+        if ((V >> ((t) - 7)) & 1) { acc_ = has_ ? s8_add(acc_, W[(t) - 7]) : W[(t) - 7]; has_ = 1; } \
+        if ((V >> ((t) - 15)) & 1) { const v8u s_ = s8_s0(W[(t) - 15]); acc_ = has_ ? s8_add(acc_, s_) : s_; has_ = 1; } \
+        if ((V >> ((t) - 16)) & 1) { acc_ = has_ ? s8_add(acc_, W[(t) - 16]) : W[(t) - 16]; has_ = 1; } \
+        if (((V >> ((t) - 2)) & (V >> ((t) - 7)) & (V >> ((t) - 15)) & (V >> ((t) - 16)) & 1) == 0) acc_ = s8_add(acc_, s8_set1(P.kc[t])); \
+        W[t] = acc_; } while (0)
+    QV_PUB_W(16); QV_PUB_W(17); QV_PUB_W(18); QV_PUB_W(19); QV_PUB_W(20); QV_PUB_W(21); QV_PUB_W(22); QV_PUB_W(23);
+    QV_PUB_W(24); QV_PUB_W(25); QV_PUB_W(26); QV_PUB_W(27); QV_PUB_W(28); QV_PUB_W(29); QV_PUB_W(30); QV_PUB_W(31);
+#undef QV_PUB_W
+    for (int t = 32; t < 64; t++)
+        W[t] = s8_add(s8_add(s8_s1(W[t - 2]), W[t - 7]), s8_add(s8_s0(W[t - 15]), W[t - 16]));
+    v8u a = s8_set1(P.st0[0]), b = s8_set1(P.st0[1]), c = s8_set1(P.st0[2]);
+    v8u d = s8_add(W[0], s8_set1(P.e1c)), e = s8_set1(P.st0[4]);
+    v8u f = s8_set1(P.st0[5]), g = s8_set1(P.st0[6]), h = s8_add(W[0], s8_set1(P.a1c));
+    v8u bc = s8_set1(P.st0[0] ^ P.st0[1]);
+#define QV_PUB_ROUND(a, b, c, d, e, f, g, h, kw, bc) do { \
+        v8u t1_ = s8_add(s8_add(h, s8_S1(e)), s8_add(s8_xor(g, s8_and(e, s8_xor(f, g))), (kw))); \
+        v8u ab_ = s8_xor(a, b); \
+        v8u t2_ = s8_add(s8_S0(a), s8_xor(s8_and(ab_, bc), b)); \
+        d = s8_add(d, t1_); h = s8_add(t1_, t2_); bc = ab_; \
+    } while (0)
+#define QV_PUB_KW(t) s8_add(s8_set1(K256[t]), W[t])
+    QV_PUB_ROUND(h, a, b, c, d, e, f, g, QV_PUB_KW(1), bc);
+    QV_PUB_ROUND(g, h, a, b, c, d, e, f, QV_PUB_KW(2), bc);
+    QV_PUB_ROUND(f, g, h, a, b, c, d, e, QV_PUB_KW(3), bc);
+    QV_PUB_ROUND(e, f, g, h, a, b, c, d, QV_PUB_KW(4), bc);
+    QV_PUB_ROUND(d, e, f, g, h, a, b, c, QV_PUB_KW(5), bc);
+    QV_PUB_ROUND(c, d, e, f, g, h, a, b, QV_PUB_KW(6), bc);
+    QV_PUB_ROUND(b, c, d, e, f, g, h, a, QV_PUB_KW(7), bc);
+#define QV_PUB_R8(t) \
+    QV_PUB_ROUND(a, b, c, d, e, f, g, h, QV_PUB_KW((t) + 0), bc); \
+    QV_PUB_ROUND(h, a, b, c, d, e, f, g, QV_PUB_KW((t) + 1), bc); \
+    QV_PUB_ROUND(g, h, a, b, c, d, e, f, QV_PUB_KW((t) + 2), bc); \
+    QV_PUB_ROUND(f, g, h, a, b, c, d, e, QV_PUB_KW((t) + 3), bc); \
+    QV_PUB_ROUND(e, f, g, h, a, b, c, d, QV_PUB_KW((t) + 4), bc); \
+    QV_PUB_ROUND(d, e, f, g, h, a, b, c, QV_PUB_KW((t) + 5), bc); \
+    QV_PUB_ROUND(c, d, e, f, g, h, a, b, QV_PUB_KW((t) + 6), bc); \
+    QV_PUB_ROUND(b, c, d, e, f, g, h, a, QV_PUB_KW((t) + 7), bc);
+    for (int t = 8; t < 64; t += 8) {
+        QV_PUB_R8(t)
+    }
+#undef QV_PUB_R8
+#undef QV_PUB_KW
+#undef QV_PUB_ROUND
+    return s8_add(s8_set1(P.st0[0]), a);
+}
+
 /* the 8-lane pubkey SHA of Q+ (lanes 0-3) and Q- (lanes 4-7) of one block; returns an 8-bit
  * mask of lanes whose H0 passes the leading-zero prefilter */
-static QV_INL unsigned hash_block(const vfe *xp, const vfe *yp, const vfe *xm, const vfe *ym, int use_ni) {
+static QV_INL unsigned hash_block(const vfe *xp, V yp, const vfe *xm, V ym, int use_ni) {
     using namespace qcg_sha;
-    V wp[4], wm[4];
-    v29_to_w(wp, xp); v29_to_w(wm, xm);
-    /* 32-bit words X0 (least significant) .. X7 of x, lanes 0-3 = Q+, 4-7 = Q- */
-    const __m256i idx_lo = _mm256_setr_epi32(0, 2, 4, 6, 0, 2, 4, 6), idx_hi = _mm256_setr_epi32(1, 3, 5, 7, 1, 3, 5, 7);
-    v8u X[8];
-    for (int k = 0; k < 4; k++) {
-        __m256i pl = _mm256_permutevar8x32_epi32((__m256i)wp[k], idx_lo), ml = _mm256_permutevar8x32_epi32((__m256i)wm[k], idx_lo);
-        __m256i ph = _mm256_permutevar8x32_epi32((__m256i)wp[k], idx_hi), mh = _mm256_permutevar8x32_epi32((__m256i)wm[k], idx_hi);
-        X[2 * k] = _mm256_blend_epi32(pl, ml, 0xF0);
-        X[2 * k + 1] = _mm256_blend_epi32(ph, mh, 0xF0);
-    }
-    /* parity of y */
-    __m256i par = _mm256_blend_epi32(_mm256_permutevar8x32_epi32((__m256i)yp->n[0], idx_lo),
-                                     _mm256_permutevar8x32_epi32((__m256i)ym->n[0], idx_lo), 0xF0);
-    par = _mm256_and_si256(par, _mm256_set1_epi32(1));
+    /* Canonical limbs fit in 32 bits. Pack first, then form the big-endian
+     * 32-bit words of the 33-byte compressed pubkey without a 4x64 detour. */
     v8u W[16];
-    W[0] = _mm256_or_si256(_mm256_slli_epi32(_mm256_or_si256(par, _mm256_set1_epi32(2)), 24), _mm256_srli_epi32(X[7], 8));
-    for (int j = 1; j < 8; j++) W[j] = _mm256_or_si256(_mm256_slli_epi32(X[8 - j], 24), _mm256_srli_epi32(X[7 - j], 8));
-    W[8] = _mm256_or_si256(_mm256_slli_epi32(X[0], 24), _mm256_set1_epi32(0x00800000));
+    v8u lo = hash_pack32(xp->n[0], xm->n[0]);
+    W[8] = _mm256_or_si256(_mm256_slli_epi32(lo, 24), _mm256_set1_epi32(0x00800000));
+    v8u hi = hash_pack32(xp->n[1], xm->n[1]);
+    W[7] = _mm256_or_si256(_mm256_srli_epi32(lo, 8), _mm256_slli_epi32(hi, 21));
+    lo = hi; hi = hash_pack32(xp->n[2], xm->n[2]);
+    W[6] = _mm256_or_si256(_mm256_srli_epi32(lo, 11), _mm256_slli_epi32(hi, 18));
+    lo = hi; hi = hash_pack32(xp->n[3], xm->n[3]);
+    W[5] = _mm256_or_si256(_mm256_srli_epi32(lo, 14), _mm256_slli_epi32(hi, 15));
+    lo = hi; hi = hash_pack32(xp->n[4], xm->n[4]);
+    W[4] = _mm256_or_si256(_mm256_srli_epi32(lo, 17), _mm256_slli_epi32(hi, 12));
+    lo = hi; hi = hash_pack32(xp->n[5], xm->n[5]);
+    W[3] = _mm256_or_si256(_mm256_srli_epi32(lo, 20), _mm256_slli_epi32(hi, 9));
+    lo = hi; hi = hash_pack32(xp->n[6], xm->n[6]);
+    W[2] = _mm256_or_si256(_mm256_srli_epi32(lo, 23), _mm256_slli_epi32(hi, 6));
+    lo = hi; hi = hash_pack32(xp->n[7], xm->n[7]);
+    W[1] = _mm256_or_si256(_mm256_srli_epi32(lo, 26), _mm256_slli_epi32(hi, 3));
+    const v8u par = hash_pack32(yp, ym);   /* Both inputs are exactly 0 or 1. */
+    W[0] = _mm256_or_si256(hash_pack32(xp->n[8], xm->n[8]),
+        _mm256_or_si256(_mm256_slli_epi32(par, 24), _mm256_set1_epi32(0x02000000)));
     for (int j = 9; j < 15; j++) W[j] = _mm256_setzero_si256();
     W[15] = _mm256_set1_epi32(264);
     __m256i h0;
@@ -230,9 +349,7 @@ static QV_INL unsigned hash_block(const vfe *xp, const vfe *yp, const vfe *xm, c
         pub_hash8_shani_wm(Wt, hh);
         h0 = _mm256_load_si256((const __m256i *)hh);
     } else {
-        v8u st[8];
-        s8_compress_plan<0x1FFu, 1>(st, W, S8_PLAN_PUBKEY);       /* only H0 */
-        h0 = st[0];
+        h0 = hash_pub8_single_schedule(W);
     }
 #if QSB_ZEROS_N >= 32
     __m256i ok = _mm256_cmpeq_epi32(h0, _mm256_setzero_si256());
@@ -258,31 +375,30 @@ static QV_INL void prefetch4(const tentry *Tj, const uint32_t *d4) {
 
 /* per-block temporaries of one addition step (memory operands of the out-of-line multiplies) */
 struct bst {
-    vfe xT, dx, dy, ik, lam, l2, t, y3, dxn;
+    vfe dy, ik, lam, l2, t, y3;
 };
-/* backward part before the multiplications: gather T_s; xT and dx = xT - px (1 on zero lanes);
+/* backward preparation: dx and packed yT are retained from the forward pass.
  * dy = +-yT - py */
-static QV_INL void bk_pre(bst &c, const tentry *Tj, const uint32_t *d4, uint8_t zf, const vfe &px, const vfe &py, const vfe &one) {
-    const tentry *e[4]; entries4(e, Tj, d4);
-    V wx[4], wy[4];
-    tr4(wx, e[0], e[1], e[2], e[3], 0); tr4(wy, e[0], e[1], e[2], e[3], 1);
-    v29_from_w(&c.xT, wx[0], wx[1], wx[2], wx[3]);
-    v29_subm(&c.dx, &c.xT, &px, 2);                                     /* LAZY (< 3 * 2^29) */
-    if (__builtin_expect(zf, 0)) v29_sel(&c.dx, zmask4(d4), &one, &c.dx);
-    vfe yT, ny; v29_from_w(&yT, wy[0], wy[1], wy[2], wy[3]);
-    const V sm = negmask4(d4);
-    v29_neg(&ny, &yT, 2);
-    for (int k = 0; k < 9; k++) {                                       /* dy = (neg ? -yT : yT) - py, LAZY (< 4 * 2^29) */
-        const V y = (V)_mm256_blendv_epi8((__m256i)yT.n[k], (__m256i)ny.n[k], (__m256i)sm);
-        c.dy.n[k] = y;
-    }
-    v29_subm(&c.dy, &c.dy, &py, 2);
+static QV_INL void bk_pre(bst &c, const V wy[4], const uint32_t *d4, const vfe &py) {
+    vfe yT; v29_from_w(&yT, wy[0], wy[1], wy[2], wy[3]);
+    const V sm = negmask4(d4), m29 = sm & vs1(QV_M29), m24 = sm & vs1(QV_M24);
+    const V b29 = vs1(2 * QV_M29) + m29, b24 = vs1(2 * QV_M24) + m24;
+    /* yT is packed: (y ^ M) = M - y. Bias preserves the original dy limbs exactly. */
+    c.dy.n[0] = (yT.n[0] ^ m29) + (vs1(2 * QV_P0) + (sm & vs1(2 * QV_P0 - QV_M29))) - py.n[0];
+    c.dy.n[1] = (yT.n[1] ^ m29) + (vs1(2 * QV_P1) + (sm & vs1(2 * QV_P1 - QV_M29))) - py.n[1];
+    for (int k = 2; k < 8; k++) c.dy.n[k] = (yT.n[k] ^ m29) + b29 - py.n[k];
+    c.dy.n[8] = (yT.n[8] ^ m24) + b24 - py.n[8];
 }
 /* x3 = l2 - px - xT (normalised weakly, written to px unless a zero digit keeps the old point);
  * t = px_old - x3 */
-static QV_INL void bk_x3(bst &c, vfe &px, const uint32_t *d4, uint8_t zf) {
+static QV_INL void bk_x3(bst &c, vfe &px, const vfe &dx, const uint32_t *d4, uint8_t zf) {
     vfe x3;
-    v29_sub2(&x3, &c.l2, &px, &c.xT);                                    /* < 5 * 2^29 */
+    /* dx = xT + 2p - px on nonzero lanes, hence x3 = l2 + 6p - 2px - dx.
+     * Zero lanes have dx = 1; their raw limbs remain < 2^32 and are discarded below. */
+    x3.n[0] = c.l2.n[0] + ((vs1(6 * QV_P0) - (px.n[0] << 1)) - dx.n[0]);
+    x3.n[1] = c.l2.n[1] + ((vs1(6 * QV_P1) - (px.n[1] << 1)) - dx.n[1]);
+    for (int k = 2; k < 8; k++) x3.n[k] = c.l2.n[k] + ((vs1(6 * QV_M29) - (px.n[k] << 1)) - dx.n[k]);
+    x3.n[8] = c.l2.n[8] + ((vs1(6 * QV_M24) - (px.n[8] << 1)) - dx.n[8]);
     v29_nweak(&x3);                                                      /* NORM */
     v29_subm(&c.t, &px, &x3, 2);                                         /* LAZY */
     if (__builtin_expect(zf, 0)) v29_sel(&x3, zmask4(d4), &px, &x3);
@@ -296,16 +412,21 @@ static QV_INL void bk_y3(bst &c, vfe &py, const uint32_t *d4, uint8_t zf) {
     if (__builtin_expect(zf, 0)) v29_sel(&y3, zmask4(d4), &py, &y3);
     for (int k = 0; k < 9; k++) py.n[k] = y3.n[k];
 }
-/* forward part of the next step: dxn = xN - x (1 on zero-digit lanes) */
-static QV_INL void fw_next(bst &c, const tentry *Tn, const uint32_t *dn4, uint8_t zfn, const vfe &x, const vfe &one) {
+/* forward part: retain packed yN; dxn = xN - x (1 on zero-digit lanes) */
+static QV_INL void fw_next(vfe &dxn, V yn[4], const tentry *Tn, const uint32_t *dn4, uint8_t zfn, const vfe &x, const vfe &one) {
     const tentry *e[4]; entries4(e, Tn, dn4);
     vfe xN; gather_x(&xN, e);
-    v29_subm(&c.dxn, &xN, &x, 2);
-    if (__builtin_expect(zfn, 0)) { const V m = zmask4(dn4); v29_sel(&c.dxn, m, &one, &c.dxn); }
+    tr4(yn, e[0], e[1], e[2], e[3], 1);
+    v29_subm(&dxn, &xN, &x, 2);
+    if (__builtin_expect(zfn, 0)) { const V m = zmask4(dn4); v29_sel(&dxn, m, &one, &dxn); }
 }
 
 struct vstate {
     vfe px[QSB_CG_BMAX / 4 + 4], py[QSB_CG_BMAX / 4 + 4], c[QSB_CG_BMAX / 4 + 4];
+    /* Each denominator is consumed before its block is prepared for the next pass. */
+    vfe den[QSB_CG_BMAX / 4 + 4];
+    /* Packed, transposed unsigned yT; consumed before reuse for the next window. */
+    V yt[QSB_CG_BMAX / 4 + 4][4];
     bst tmp;
 };
 
@@ -319,7 +440,8 @@ static QV_FN void ec_batch(worker_t *w, vstate *vs) {
     const int n = w->n;
     const int nb = (n + 3) >> 2;
     const tentry *T = S->table;
-    vfe *px = vs->px, *py = vs->py, *cc = vs->c;
+    vfe *px = vs->px, *py = vs->py, *cc = vs->c, *den = vs->den;
+    V (*yt)[4] = vs->yt;
     vfe one; v29_one(&one);
     const int nw = L.nwin;
     {
@@ -339,10 +461,11 @@ static QV_FN void ec_batch(worker_t *w, vstate *vs) {
         for (int b = 0; b < nb; b++) {
             if (b + QSB_CG_PF < nb) prefetch4(Tj, dg + 4 * (b + QSB_CG_PF));
             const tentry *e[4]; entries4(e, Tj, dg + 4 * b);
-            vfe xT, dx; gather_x(&xT, e);
-            v29_subm(&dx, &xT, &px[b], 2);
-            if (zf[b]) v29_sel(&dx, zmask4(dg + 4 * b), &one, &dx);
-            v29_mul_o(&cc[b], b ? &cc[b - 1] : &one, &dx);
+            vfe xT; gather_x(&xT, e);
+            tr4(yt[b], e[0], e[1], e[2], e[3], 1);
+            v29_subm(&den[b], &xT, &px[b], 2);
+            if (zf[b]) v29_sel(&den[b], zmask4(dg + 4 * b), &one, &den[b]);
+            v29_mul_o(&cc[b], b ? &cc[b - 1] : &one, &den[b]);
         }
         acc = cc[nb - 1];
     }
@@ -354,7 +477,6 @@ static QV_FN void ec_batch(worker_t *w, vstate *vs) {
         const vfe *accp = &one;
         const uint32_t *dg = w->dig[s];
         const uint8_t *zf = w->zf[s];
-        const tentry *Tj = T + L.off[s];
         const int last = (s + 1 == nw);
         const uint32_t *dgn = last ? NULL : w->dig[s + 1];
         const uint8_t *zfn = last ? NULL : w->zf[s + 1];
@@ -364,20 +486,22 @@ static QV_FN void ec_batch(worker_t *w, vstate *vs) {
         for (int it = 0; it < nb; it++, b += step) {
             const int bp = b + step;
             const int bf = b + step * QSB_CG_PF;
-            if (bf >= 0 && bf < nb) { prefetch4(Tj, dg + 4 * bf); if (!last) prefetch4(Tn, dgn + 4 * bf); }
             bst &c = vs->tmp;
-            bk_pre(c, Tj, dg + 4 * b, zf[b], px[b], py[b], one);
+            const vfe &dx = den[b];
+            bk_pre(c, yt[b], dg + 4 * b, py[b]);
             const vfe *ikp;
-            if (it + 1 < nb) { v29_mul_o(&c.ik, &ubuf[ui], &cc[bp]); v29_mul_o(&ubuf[ui ^ 1], &ubuf[ui], &c.dx); ui ^= 1; ikp = &c.ik; }
+            if (it + 1 < nb) { v29_mul_o(&c.ik, &ubuf[ui], &cc[bp]); v29_mul_o(&ubuf[ui ^ 1], &ubuf[ui], &dx); ui ^= 1; ikp = &c.ik; }
             else ikp = &ubuf[ui];
             v29_mul_o(&c.lam, &c.dy, ikp);
             v29_sqr_o(&c.l2, &c.lam);
-            bk_x3(c, px[b], dg + 4 * b, zf[b]);
+            bk_x3(c, px[b], dx, dg + 4 * b, zf[b]);
             v29_mul_o(&c.y3, &c.lam, &c.t);
             bk_y3(c, py[b], dg + 4 * b, zf[b]);
-            if (!last) fw_next(c, Tn, dgn + 4 * b, zfn[b], px[b], one);
-            else v29_subm(&c.dxn, &xD, &px[b], 2);
-            v29_mul_o(&cc[b], accp, &c.dxn);
+            if (!last) {
+                if (bf >= 0 && bf < nb) prefetch4(Tn, dgn + 4 * bf);
+                fw_next(den[b], yt[b], Tn, dgn + 4 * b, zfn[b], px[b], one);
+            } else v29_subm(&den[b], &xD, &px[b], 2);
+            v29_mul_o(&cc[b], accp, &den[b]);
             accp = &cc[b];
         }
         acc = *accp;
@@ -390,8 +514,8 @@ static QV_FN void ec_batch(worker_t *w, vstate *vs) {
         int b = asc ? nb - 1 : 0;
         for (int it = 0; it < nb; it++, b += step) {
             const int bp = b + step;
-            vfe dx, dy, ik, lam, l2, xm, t, ym;
-            v29_subm(&dx, &xD, &px[b], 2);
+            const vfe &dx = den[b];
+            vfe dy, ik, lam, l2, xm, t, ym;
             const vfe *ikp;
             if (it + 1 < nb) { v29_mul_o(&ik, &ubuf[ui], &cc[bp]); v29_mul_o(&ubuf[ui ^ 1], &ubuf[ui], &dx); ui ^= 1; ikp = &ik; }
             else ikp = &ubuf[ui];
@@ -402,16 +526,20 @@ static QV_FN void ec_batch(worker_t *w, vstate *vs) {
             v29_nweak(&xm);                                               /* NORM */
             v29_subm(&t, &px[b], &xm, 2);
             v29_mul_o(&ym, &lam, &t);
-            v29_subm(&ym, &ym, &py[b], 2);
-            vfe xp = px[b], yp = py[b];
-            v29_norm(&xp); v29_norm(&yp); v29_norm(&xm); v29_norm(&ym);
+            /* This block's EC arithmetic is finished; canonicalise x in place. */
+            vfe &xp = px[b];
+            v29_norm_weak(&xp); v29_norm_weak(&xm);
+            V pp, pm; v29_pub_parity(&pp, &pm, &py[b], &ym);
 #ifdef QCG_EC_HOOK
+            v29_subm(&ym, &ym, &py[b], 2);
+            v29_nweak(&ym);
+            vfe yp = py[b]; v29_norm(&yp); v29_norm(&ym);
             { V a4[4], b4[4], c4[4], d4[4]; v29_to_w(a4, &xp); v29_to_w(b4, &yp); v29_to_w(c4, &xm); v29_to_w(d4, &ym);
               for (int l = 0; l < 4; l++) { uint64_t X0[4], Y0[4], X1[4], Y1[4];
                   for (int q = 0; q < 4; q++) { X0[q] = a4[q][l]; Y0[q] = b4[q][l]; X1[q] = c4[q][l]; Y1[q] = d4[q][l]; }
                   if (4 * b + l < n) QCG_EC_HOOK(w, 4 * b + l, X0, Y0, X1, Y1); } }
 #endif
-            const unsigned hm = hash_block(&xp, &yp, &xm, &ym, use_ni);
+            const unsigned hm = hash_block(&xp, pp, &xm, pm, use_ni);
             if (hm) {
                 for (int l = 0; l < 8; l++) if (hm >> l & 1) {
                     const int ci = 4 * b + (l & 3);
