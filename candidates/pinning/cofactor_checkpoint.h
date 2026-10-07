@@ -1,4 +1,4 @@
-// Dependency-scoped barrier mechanism follows Calcutatatoraa95b1b9;
+/* Dependency-scoped barrier mechanism follows Calcutatatoraa95b1b9; */
 // applied here to the distinct public cofactor exclusion traversal.
 // Public cofactor collective: tekkac, submission31e98e47, commit554fa24c.
 // Merged top-16 traversal (QSB_TOP16): idea and schedule from @EvanYan1024's public
@@ -122,9 +122,9 @@ template<int N> __device__ __forceinline__ void qsb_cofactor_top16(
 }
 #endif /* QSB_TOP16 */
 
-// The caller supplies nonzero effective leaves (identity for unusable lanes).
+/* The caller supplies nonzero effective leaves (identity for unusable lanes). */
 // Preserve immutable products and accumulate exclusion products separately.
-// All N lanes participate in every barrier; one block publishes one raw root.
+/* All N lanes participate in every barrier; one block publishes one raw root. */
 template<int N> __device__ __forceinline__ void qsb_cofactor_prepare(
     uint64_t *value,uint64_t *roots,uint64_t (*products)[2*N],uint64_t (*excluded)[N]) {
 #if QSB_TOP16

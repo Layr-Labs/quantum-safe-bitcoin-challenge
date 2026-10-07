@@ -8,8 +8,8 @@
 #error QSB_BIGTBL must be 0 or 1
 #endif
 
-// Four-bank cache geometry from 0xCramJam c13f3832 / 90f89008.
-// Keep the promoted GLV12 geometry as an independently compilable control.
+/* Four-bank cache geometry from 0xCramJam c13f3832 / 90f89008. */
+/* Keep the promoted GLV12 geometry as an independently compilable control. */
 #ifndef QSB_FOUR_HOT
 #define QSB_FOUR_HOT 1
 #endif
@@ -128,7 +128,7 @@
 #endif
 
 #if QSB_BIGTBL
-// BEGIN QSB_BIGTBL_HOST_EXACT
+/* BEGIN QSB_BIGTBL_HOST_EXACT */
 /* Six terms per signed GLV component. The split below is unchanged. Its
  * rounded reciprocal error gives |r_i| <=
  * 0xa2a8918ca85bafe22016d0b917e4dd77. At shift 104 the largest top
@@ -218,7 +218,7 @@ __host__ __device__ __forceinline__ uint32_t q11_bigtbl_code(
     return (q9_bigtbl_offset(c)+idx)|((neg_digit^sign)<<31);
 }
 #endif
-// END QSB_BIGTBL_HOST_EXACT
+/* END QSB_BIGTBL_HOST_EXACT */
 
 #if QSB_DIGIT_LEAN
 /* QSB_DIGIT_LEAN: the same 32-bit code as q9_bigtbl_code(mag,sign,c), written so that
@@ -428,7 +428,7 @@ __host__ __device__ __forceinline__ void q9_bigtbl_seed_z(const uint64_t w[2],ui
 }
 #endif
 
-// QSB/VanitySearch GPLv3 exact wide-product schedule, without field reduction.
+/* QSB/VanitySearch GPLv3 exact wide-product schedule, without field reduction. */
 __device__ __forceinline__ void q9_wide(uint64_t out[8],const uint64_t a[4],const uint64_t b[4]){
     uint64_t r0,r1,r2,r3,r4,r5,r6,r7;
     asm(
@@ -648,8 +648,8 @@ __device__ __forceinline__ uint64_t q9_madw(uint32_t a,uint32_t b,uint64_t c){
 }
 #endif
 // GLV lattice and rounded-reciprocal constants from bitcoin-core/secp256k1
-// v0.6.0 scalar_impl.h, Copyright (c) 2014 Pieter Wuille, MIT.
-// The original MIT license is supplied as COPYING-secp256k1.
+/* v0.6.0 scalar_impl.h, Copyright (c) 2014 Pieter Wuille, MIT. */
+/* The original MIT license is supplied as COPYING-secp256k1. */
 #ifndef QSB_GLV_HIGH15
 #define QSB_GLV_HIGH15 1
 #endif
@@ -734,6 +734,12 @@ __device__ __forceinline__ void q9_high15_begin(uint64_t *acc,uint32_t *overflow
  * product words. All omitted terms are nonnegative and below 9*2^352 for g1,
  * 8*2^352 for g2. Widening the bit-383 rounding guard preserves exactness.
  * test_glv_coeff.py computes the bound and exercises the actual function. */
+#ifndef QSB_GLV_HI10_PAIR
+#define QSB_GLV_HI10_PAIR 0
+#endif
+#if QSB_GLV_HI10_PAIR != 0 && QSB_GLV_HI10_PAIR != 1
+#error "QSB_GLV_HI10_PAIR must be 0 or 1"
+#endif
 #ifndef QSB_GLV_HIGH10_HI
 #define QSB_GLV_HIGH10_HI 1
 #endif
@@ -779,7 +785,13 @@ __device__ __forceinline__ void q9_coeff_high15(uint64_t out[2],const uint64_t k
 #if QSB_GLV_HIGH10_HI
     // b7+b6 < 2^32 for both production reciprocals: the first sum fits u32.
     const uint32_t first=q9_mulhi32(a3,b7)+q9_mulhi32(a4,b6);
+#if QSB_GLV_HI10_PAIR
+    /* b4+b3 is 0xd02f7529 (g1) or 0x2cd1ed70 (g2), so this pair fits u32. */
+    const uint32_t last=q9_mulhi32(a6,b4)+q9_mulhi32(a7,b3);
+    carry=(uint64_t)first+q9_mulhi32(a5,b5)+last;
+#else
     carry=(uint64_t)first+q9_mulhi32(a5,b5)+q9_mulhi32(a6,b4)+q9_mulhi32(a7,b3);
+#endif
     w10=0;
 #else
     q9_high15_begin(&acc,&overflow,carry,q9_mulw(a3,b7),q9_mulw(a4,b6));
