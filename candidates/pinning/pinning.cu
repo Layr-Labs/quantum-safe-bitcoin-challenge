@@ -181,7 +181,7 @@
 #error "QSB_AB_B0CONST transposes the QSB_ASICBOOST locktime walk"
 #endif
 #ifndef QSB_AB_WHOLE_BATCH
-#define QSB_AB_WHOLE_BATCH 0
+#define QSB_AB_WHOLE_BATCH 1
 
 #endif
 #ifndef QSB_SHA_OPT
