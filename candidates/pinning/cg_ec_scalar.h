@@ -185,8 +185,40 @@ __attribute__((target("sha,sse4.1"), noinline)) static void pub_hash8_shani(cons
     }
 }
 
+/* Research control: specialized NI at the independent CPU co-grinder key-hash call site.
+ * No host-PK policy change. Zero retains the literal generic message/IV body below. */
+#ifndef QSB_CG_PUBKEY_NI_DIRECT
+#define QSB_CG_PUBKEY_NI_DIRECT 1
+#endif
+#if QSB_CG_PUBKEY_NI_DIRECT != 0 && QSB_CG_PUBKEY_NI_DIRECT != 1
+#error "QSB_CG_PUBKEY_NI_DIRECT must be zero or one"
+#endif
+#if QSB_CG_PUBKEY_NI_DIRECT
+/* Included inside qcg, as is this scalar/CPU header. Arithmetic bytes are the
+ * independently qualified original direct33B NI helper; no schedule rewrite. */
+#include "pksha_shani_direct.h"
+__attribute__((target("sha,ssse3,sse4.1"), noinline))
+static void pub_hash8_shani_wm_direct(const uint32_t Wt[9][8], uint32_t h0[8]) {
+    for (int k = 0; k < 8; k += 2) {
+        const __m128i a0 = _mm_setr_epi32(Wt[0][k], Wt[1][k], Wt[2][k], Wt[3][k]);
+        const __m128i a1 = _mm_setr_epi32(Wt[4][k], Wt[5][k], Wt[6][k], Wt[7][k]);
+        const __m128i a2 = _mm_setr_epi32(Wt[8][k], 0, 0, 0);
+        const __m128i b0 = _mm_setr_epi32(Wt[0][k+1], Wt[1][k+1], Wt[2][k+1], Wt[3][k+1]);
+        const __m128i b1 = _mm_setr_epi32(Wt[4][k+1], Wt[5][k+1], Wt[6][k+1], Wt[7][k+1]);
+        const __m128i b2 = _mm_setr_epi32(Wt[8][k+1], 0, 0, 0);
+        qsb_pksha_direct::pubkey_h0_pair(a0, a1, a2, b0, b1, b2, &h0[k], &h0[k+1]);
+    }
+}
+#endif
+
 /* word-major variant (Wt[j][k] = word j of key k), used by the AVX2 EC stage on SHA-NI hosts */
 __attribute__((target("sha,sse4.1"), noinline)) static void pub_hash8_shani_wm(const uint32_t Wt[9][8], uint32_t h0[8]) {
+#if QSB_CG_PUBKEY_NI_DIRECT
+    if (__builtin_cpu_supports("sha") && __builtin_cpu_supports("sse4.1") && __builtin_cpu_supports("ssse3")) {
+        pub_hash8_shani_wm_direct(Wt, h0);
+        return;
+    }
+#endif
     using namespace qcg_sha;
     for (int k = 0; k < 8; k += 2) {
         uint32_t wa[16], wb[16], sa[8], sb[8];
