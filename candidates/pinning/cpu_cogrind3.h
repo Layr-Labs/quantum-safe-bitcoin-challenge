@@ -57,7 +57,7 @@ static cpu_set_t g_worker_set; static int g_worker_set_on = 0;
 #endif
 #define QSB_CG_BMAX QSB_CG_B
 #ifndef QSB_CG_PF
-#define QSB_CG_PF 4                       /* table prefetch distance, in 4-candidate blocks */
+#define QSB_CG_PF 2                       /* retained denominator/y cache: prefetch only next table window */
 #endif
 #define QSB_CG_MAXWIN 16
 #define QSB_CG_MAXW 256                   /* max worker threads */

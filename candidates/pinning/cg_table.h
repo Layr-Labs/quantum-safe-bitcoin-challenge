@@ -35,22 +35,43 @@ static tb_ctx g_tb;
 
 static void bn_to_w(const BIGNUM *b, uint64_t *w) { uint8_t t[32]; BN_bn2lebinpad(b, t, 32); memcpy(w, t, 32); }
 
-/* affine (x, y) of k * G_j (+ A if addA) through OpenSSL; k given as BIGNUM scalar of B */
-static int ossl_point(EC_GROUP *grp, BN_CTX *ctx, const BIGNUM *sc, int addA, uint64_t *x, uint64_t *y) {
-    int ok = 0;
-    EC_POINT *P = EC_POINT_new(grp), *A = EC_POINT_new(grp);
-    BIGNUM *bx = BN_new(), *by = BN_new(), *ax = BN_new(), *ay = BN_new();
-    if (P && A && bx && by && ax && ay && EC_POINT_mul(grp, P, sc, NULL, NULL, ctx)) {
-        ok = 1;
-        if (addA) {
-            const pinning2_params_t *pp = g_cg->pp;
-            ok = BN_lebin2bn(pp->u2r_x, 32, ax) && BN_lebin2bn(pp->u2r_y, 32, ay) &&
-                 EC_POINT_set_affine_coordinates(grp, A, ax, ay, ctx) && EC_POINT_add(grp, P, P, A, ctx);
-        }
-        if (ok) ok = !EC_POINT_is_at_infinity(grp, P) && EC_POINT_get_affine_coordinates(grp, P, bx, by, ctx);
-        if (ok) { bn_to_w(bx, x); bn_to_w(by, y); }
+/* Private to one builder (or one serial reference pass), never shared between threads.
+ * Result/coordinate objects are reused; A is initialized on its first actual use. */
+struct tb_point_workspace {
+    EC_POINT *P, *A;
+    BIGNUM *bx, *by;
+    tb_point_workspace() : P(NULL), A(NULL), bx(NULL), by(NULL) {}
+    tb_point_workspace(const tb_point_workspace &) = delete;
+    tb_point_workspace &operator=(const tb_point_workspace &) = delete;
+    void clear() {
+        EC_POINT_free(P); EC_POINT_free(A); BN_free(bx); BN_free(by);
+        P = A = NULL; bx = by = NULL;
     }
-    EC_POINT_free(P); EC_POINT_free(A); BN_free(bx); BN_free(by); BN_free(ax); BN_free(ay);
+    ~tb_point_workspace() { clear(); }
+};
+
+/* affine (x, y) of k * G_j (+ A if addA); sc and group belong to the same caller. */
+static int ossl_point(EC_GROUP *grp, BN_CTX *ctx, const BIGNUM *sc, int addA, uint64_t *x, uint64_t *y,
+                      tb_point_workspace &ws) {
+    if (!ws.P) ws.P = EC_POINT_new(grp);
+    if (!ws.bx) ws.bx = BN_new();
+    if (!ws.by) ws.by = BN_new();
+    if (!ws.P || !ws.bx || !ws.by) return 0;
+    int ok = EC_POINT_mul(grp, ws.P, sc, NULL, NULL, ctx);
+    if (ok && addA) {
+        if (!ws.A) {
+            const pinning2_params_t *pp = g_cg->pp;
+            EC_POINT *a = EC_POINT_new(grp);
+            if (!a) return 0;
+            ok = BN_lebin2bn(pp->u2r_x, 32, ws.bx) && BN_lebin2bn(pp->u2r_y, 32, ws.by) &&
+                 EC_POINT_set_affine_coordinates(grp, a, ws.bx, ws.by, ctx);
+            if (!ok) { EC_POINT_free(a); return 0; }
+            ws.A = a;  /* publish only a fully initialized, immutable point */
+        }
+        ok = EC_POINT_add(grp, ws.P, ws.P, ws.A, ctx);
+    }
+    if (ok) ok = !EC_POINT_is_at_infinity(grp, ws.P) && EC_POINT_get_affine_coordinates(grp, ws.P, ws.bx, ws.by, ctx);
+    if (ok) { bn_to_w(ws.bx, x); bn_to_w(ws.by, y); }
     return ok;
 }
 /* scalar of B for entry e of window j: (e + off_j) * 2^pos_j * neg_r_inv mod n */
@@ -127,7 +148,7 @@ static int build_kg(int j, const uint64_t *gx, const uint64_t *gy) {
 }
 
 template <class F>
-static int build_segment(int j, uint64_t seg, EC_GROUP *grp, BN_CTX *ctx, const BIGNUM *nri, const BIGNUM *order, BIGNUM *sc,
+static int build_segment(int j, uint64_t seg, EC_GROUP *grp, BN_CTX *ctx, const BIGNUM *nri, const BIGNUM *order, BIGNUM *sc, tb_point_workspace &point_ws,
                          fe4_t *rowx, fe4_t *rowy, fe4_t *nx, fe4_t *ny, fe4_t *kx, fe4_t *ky, fe4_t *tmp) {
     shared_t *S = g_cg;
     const layout_t &L = S->lay;
@@ -152,7 +173,7 @@ static int build_segment(int j, uint64_t seg, EC_GROUP *grp, BN_CTX *ctx, const 
 #endif
     } else {
         entry_scalar(sc, j, e0, nri, order, ctx);
-        if (!ossl_point(grp, ctx, sc, j == 0, sx, sy)) return -1;
+        if (!ossl_point(grp, ctx, sc, j == 0, sx, sy, point_ws)) return -1;
         memcpy(rowx[0], sx, 32); memcpy(rowy[0], sy, 32);
         fe4_t px[1], py[1]; memcpy(px[0], sx, 32); memcpy(py[0], sy, 32);
         /* start + (k) G = start + kg[k-1], k = 1..TB_R-1 */
@@ -190,15 +211,17 @@ static void *builder_main_t(void *arg) {
     if (!grp || !ctx || !nri || !order || !sc || !buf) { g_tb.bad.store(1); return NULL; }
     EC_GROUP_get_order(grp, order, ctx);
     BN_lebin2bn(S->pp->neg_r_inv, 32, nri);
+    tb_point_workspace point_ws;
     const uint64_t total = g_tb.seg_first[L.nwin];
     for (;;) {
         const uint64_t s = g_tb.next_seg.fetch_add(1);
         if (s >= total || g_tb.bad.load() || S->stop.load()) break;
         int j = 0; while (s >= g_tb.seg_first[j + 1]) j++;
-        if (build_segment<F>(j, s - g_tb.seg_first[j], grp, ctx, nri, order, sc,
+        if (build_segment<F>(j, s - g_tb.seg_first[j], grp, ctx, nri, order, sc, point_ws,
                              buf, buf + TB_R, buf + 2 * TB_R, buf + 3 * TB_R, buf + 4 * TB_R, buf + 5 * TB_R, buf + 6 * TB_R))
             g_tb.bad.store(1);
     }
+    point_ws.clear();
     free(buf); BN_free(nri); BN_free(order); BN_free(sc); BN_CTX_free(ctx); EC_GROUP_free(grp);
     return NULL;
 }
@@ -212,6 +235,7 @@ static int table_spot_check() {
     BIGNUM *nri = BN_new(), *order = BN_new(), *sc = BN_new();
     EC_GROUP_get_order(grp, order, ctx);
     BN_lebin2bn(S->pp->neg_r_inv, 32, nri);
+    tb_point_workspace point_ws;
     int bad = 0;
     uint64_t rs = 0x9E3779B97F4A7C15ULL;
     for (int j = 0; j < L.nwin && !bad; j++) {
@@ -221,11 +245,12 @@ static int table_spot_check() {
             if (e >= L.cnt[j]) continue;
             uint64_t x[4], y[4];
             entry_scalar(sc, j, e, nri, order, ctx);
-            if (!ossl_point(grp, ctx, sc, j == 0, x, y)) { bad = 1; break; }
+            if (!ossl_point(grp, ctx, sc, j == 0, x, y, point_ws)) { bad = 1; break; }
             const tentry *te = S->table + L.off[j] + e;
             if (memcmp(te->x, x, 32) || memcmp(te->y, y, 32)) bad = 1;
         }
     }
+    point_ws.clear();
     BN_free(nri); BN_free(order); BN_free(sc); BN_CTX_free(ctx); EC_GROUP_free(grp);
     return bad;
 }
@@ -300,13 +325,15 @@ static int table_start(shared_t *S, int nw) {
                  EC_POINT_dbl(grp, D, A, ctx) && EC_POINT_invert(grp, D, ctx) &&
                  EC_POINT_get_affine_coordinates(grp, D, bx, by, ctx);
     if (ok) { bn_to_w(bx, S->dx_w); bn_to_w(by, S->dy_w); memcpy(S->ax_w, S->pp->u2r_x, 32); memcpy(S->ay_w, S->pp->u2r_y, 32); }
+    tb_point_workspace point_ws;
     /* per-window k G_j tables (TB_R points each), serial: ~1 ms per window */
     for (int j = 0; j < L.nwin && ok; j++) {
         uint64_t gx[4], gy[4];
         BN_one(sc); BN_lshift(sc, sc, L.pos[j]); BN_mod_mul(sc, sc, nri, order, ctx);
-        ok = ossl_point(grp, ctx, sc, 0, gx, gy);
+        ok = ossl_point(grp, ctx, sc, 0, gx, gy, point_ws);
         if (ok) ok = (g_fe_asm ? build_kg<qcg_fe::FeAsm>(j, gx, gy) : build_kg<qcg_fe::FeC>(j, gx, gy)) == 0;
     }
+    point_ws.clear();
     EC_POINT_free(A); EC_POINT_free(D); BN_free(order); BN_free(nri); BN_free(sc); BN_free(bx); BN_free(by);
     BN_CTX_free(ctx); EC_GROUP_free(grp);
     if (!ok) return -1;
