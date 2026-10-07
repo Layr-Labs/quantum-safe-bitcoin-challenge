@@ -161,7 +161,6 @@ struct shared_t {
     int ec_env, sha_env;                  /* overrides, -1 = auto */
     std::atomic<int> ec_mode;             /* 0 = C, 1 = scalar asm, 2 = avx2 x4, 3 = avx512 ifma x4; -1 until chosen */
     std::atomic<int> sha_mode;            /* 0 = ref, 1 = avx2 x8, 2 = sha-ni */
-    std::atomic<int> sha_x9;
     std::atomic<uint64_t> busy_ns[QSB_CG_MAXW];
     std::atomic<uint64_t> sha_cyc, ec_cyc;
     double t_build;
@@ -393,39 +392,6 @@ static unsigned z_avx2_8(worker_t *w, int i0) {
     return 0;
 }
 
-#ifndef QSB_CG_SHA_RORX_LANE
-#define QSB_CG_SHA_RORX_LANE 1
-#endif
-#if QSB_CG_SHA_RORX_LANE
-__attribute__((target("avx2,bmi2"), noinline))
-static void z_avx2_9(worker_t *w, int i0) {
-    using namespace qcg_sha;
-    shared_t *S = g_cg;
-    const uint32_t lt0 = w->lt0 + (uint32_t)i0;
-    v8u lt = _mm256_add_epi32(_mm256_set1_epi32((int)lt0), _mm256_setr_epi32(0, 1, 2, 3, 4, 5, 6, 7));
-    v8u W[16];
-    uint32_t SW[16];
-    for (int k = 0; k < 16; k++) { W[k] = _mm256_set1_epi32((int)S->w1_tmpl[k]); SW[k] = S->w1_tmpl[k]; }
-    const uint32_t l9 = lt0 + 8u;
-    for (int b = 0; b < 4; b++) {
-        v8u byte = _mm256_and_si256(_mm256_srli_epi32(lt, 8 * b), _mm256_set1_epi32(0xFF));
-        W[S->lt_word[b]] = _mm256_or_si256(W[S->lt_word[b]], _mm256_sllv_epi32(byte, _mm256_set1_epi32(S->lt_shift[b])));
-        SW[S->lt_word[b]] |= ((l9 >> (8 * b)) & 0xFFu) << S->lt_shift[b];
-    }
-    v8u st[8];
-    uint32_t ss[8];
-    s9_compress_plan<0x3u, 0>(st, W, ss, SW, w->tplan);
-    s9_compress_plan<0xFFu, 0>(st, st, ss, ss, S8_PLAN_DIGEST);
-    for (int k = 0; k < 4; k++) {
-        const __m256i hi = st[6 - 2 * k], lo = st[7 - 2 * k];
-        const __m256i a = _mm256_unpacklo_epi32(lo, hi), b = _mm256_unpackhi_epi32(lo, hi);
-        _mm256_storeu_si256((__m256i *)&w->zq[k][i0], _mm256_permute2x128_si256(a, b, 0x20));
-        _mm256_storeu_si256((__m256i *)&w->zq[k][i0 + 4], _mm256_permute2x128_si256(a, b, 0x31));
-        w->zq[k][i0 + 8] = (uint64_t)ss[6 - 2 * k] << 32 | ss[7 - 2 * k];
-    }
-}
-#endif
-
 __attribute__((target("sha,sse4.1"), noinline))
 static unsigned z_shani_2(worker_t *w, int i0) {
     using namespace qcg_sha;
@@ -482,14 +448,7 @@ static int fill_batch(worker_t *w) {
     const int mode = S->cache_first ? S->sha_mode.load(std::memory_order_relaxed) : 0;
     if (S->cache_first && w->cur_seq_tag != (uint64_t)seq + 1) { seq_midstate(w, seq); w->cur_seq_tag = (uint64_t)seq + 1; }
     if (mode == 2) { for (int i = 0; i < np; i += 2) z_shani_2(w, i); }
-    else if (mode == 1) {
-        int i = 0;
-#if QSB_CG_SHA_RORX_LANE
-
-        if (w->tfast && S->has_adx && S->sha_x9.load(std::memory_order_relaxed)) { for (; i + 9 <= np; i += 9) z_avx2_9(w, i); if (i < np) z_avx2_8(w, np - 8); i = np; }
-#endif
-        for (; i < np; i += 8) z_avx2_8(w, i);
-    }
+    else if (mode == 1) { for (int i = 0; i < np; i += 8) z_avx2_8(w, i); }
     else {
         for (int i = 0; i < np; i++) { uint64_t q[4]; z_generic(w, seq, w->lt0 + (uint32_t)i, q); for (int k = 0; k < 4; k++) w->zq[k][i] = q[k]; }
     }
@@ -515,6 +474,7 @@ static int fill_batch(worker_t *w) {
 static double mem_available_mib();
 #endif
 #include "cg_table.h"
+
 
 static void run_ec(worker_t *w, int mode, void *vs, void *ss, void *vi) {
 #if QSB_CG_HAVE_SIMD
@@ -592,27 +552,6 @@ static void *worker_main(void *arg) {
             const double margin = m == 3 ? 1.0 : (bec == 2 && m != 2) ? 0.9 : (m == 2 && bec != 2) ? 1.0 / 0.9 : 1.0;
             if (ec_best[m] < margin * ec_best[bec]) bec = m;
         }
-#if QSB_CG_SHA_RORX_LANE
-
-        double x9_best = 1e30;
-        if (bsha == 1 && S->has_adx && w->tfast) {
-            S->sha_mode.store(1); S->sha_x9.store(1);
-            for (int rep = 0; rep < 5; rep++) {
-                const uint64_t r0 = __rdtsc();
-                const int n = fill_batch(w);
-                if (!n) break;
-                const uint64_t r1 = __rdtsc();
-                run_ec(w, bec, vs, ss, vi);
-                S->cand_done.fetch_add((uint64_t)n, std::memory_order_relaxed);
-                if (rep == 0) continue;
-                const double ts = (double)(r1 - r0) / n;
-                if (ts < x9_best) x9_best = ts;
-            }
-            S->sha_x9.store(x9_best < 0.97 * sha_best[1] ? 1 : 0);
-        }
-        if (g_ctl_verbose && x9_best < 1e29)
-            printf("  [CPU] tsc/cand sha avx2x9 %.0f vs avx2x8 %.0f: %s\n", x9_best, sha_best[1], S->sha_x9.load() ? "x9" : "x8");
-#endif
         S->sha_mode.store(bsha);
         S->ec_mode.store(bec);
         if (g_ctl_verbose) {
@@ -878,7 +817,7 @@ static int start(const pinning2_params_t *pp, uint32_t lt_min, uint32_t lt_max) 
         if ((S->sha_env == 2 && !has_sha) || (S->sha_env == 1 && !has_avx2)) S->sha_env = 0;
     }
     if (!S->cache_first) S->sha_env = 0;   /* non-standard layout: generic scalar SHA */
-    S->ec_mode.store(-1); S->sha_mode.store(0); S->sha_x9.store(0);
+    S->ec_mode.store(-1); S->sha_mode.store(0);
     /* suffix block 1 template and the locktime byte positions */
     if (S->cache_first) {
         uint8_t m[128]; memset(m, 0, 128);
