@@ -1,4 +1,4 @@
-#define QSB_REDRAW_09260102 1   /* inert re-measurement tag; unreferenced */
+#define QSB_REDRAW_10061400 1   /* inert re-measurement tag; unreferenced */
 #ifndef QSB_FKLEAN_TAG_0924
 #define QSB_FKLEAN_TAG_0924 1 /* fk minus the IPC/pipe-routing switches */
 #endif
@@ -8,4 +8,10 @@
 /* Keep the paired SHA constant-block loop compact on the ranked PTX route. */
 #define QSB_PAIR_SHA_UNROLL_CONST 0
 #define QSB_SHA_FMA_ADD 0
+#define QSB_HIT_TELEMETRY 0   /* no runtime telemetry in the hit order (terrapinelf's setting) */
+#define QSB_CPU_FENCE 1   /* kshitij-hash's co-grinder fence (c90f7060): the CPU grinds the GPU's 128 window patterns above F */
+#define QSB_SX_CC_FLAT 1   /* ours: each constant SHA block written out as one straight 64-round body (bit-identical) */
+#define QSB_CPU_DIAG_EPOCH 0   /* terrapinelf: the co-grinder walks from epoch 0 (no diagnostic code); the fence requires it */
+#define QSB_CODE_ROLL 2   /* the pair gate as a 2-trip loop over the two recids (ercumentyildirim PR 2441, ported) */
+#define QSB_Q_MIX 2   /* as in the record: the Q-layout axis (ercumentyildirim); both forms lay out the same Q terms */
 #include "tests/gpu_epochs/tree.cu"
