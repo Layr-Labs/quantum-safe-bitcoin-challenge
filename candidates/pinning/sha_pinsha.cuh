@@ -527,22 +527,10 @@ QSB_RL_F(b, c, d, e, f, g, h, a, QSB_KWF(qsb_klit(k + 15), w[15]));\
 #ifndef QSB_FIN_R63_SUM
 #define QSB_FIN_R63_SUM 1
 #endif
-
-#ifndef QSB_FIN_R63_LEA
-#define QSB_FIN_R63_LEA 1
-#endif
 /* QSB_FIN_W8S0 (kill switch): s0 of the padded last message word W8 = (b << 24) | 0x800000
  * (b = the low byte of x) from its 8 live bits; see the W23 step of _SHA256Pubkey33H0. */
 #ifndef QSB_FIN_W8S0
 #define QSB_FIN_W8S0 1
-#endif
-
-#ifndef QSB_FIN_W8ODD
-#define QSB_FIN_W8ODD 1
-#endif
-
-#ifndef QSB_FIN_W24_O8
-#define QSB_FIN_W24_O8 1
 #endif
 #if QSB_SHA_FMA_ADD
 /* QSB_RL_F with a literal h folded into the round constant: KH = K_i + h. */
@@ -614,30 +602,17 @@ __device__ __forceinline__ uint32_t _SHA256Pubkey33H0(const uint32_t m[9])
              * 0x10020 (bits 5, 16), so the XOR of the three equals their sum:
              * s0(W8) = b*64 + (b ^ b*16 ^ 8)*2^17 + 0x10020 (checked for all 256 b). Two ALU ops
              * (shift, LOP3) replace two rotations, a shift and a LOP3; the rest runs as IMAD. */
-#if QSB_FIN_W8ODD
-            const uint32_t o8 = w[8] >> 23;
-            const uint32_t c8 = o8 ^ qsb_fadd(o8, 16u, 0u);
-            uint32_t t8 = qsb_fadd(qsb_fadd(w[7], one, QSB_s1M(w[5])), one, w[0]);
-            t8 = qsb_fadd(o8, 32u, t8);
-            w[7] = qsb_fadd(c8, 65536u, t8);
-#else
             const uint32_t b8 = w[8] >> 24;
             const uint32_t c8 = b8 ^ qsb_fadd(b8, 16u, 0u) ^ 8u;
             uint32_t t8 = qsb_fadd(qsb_fadd(w[7], one, QSB_s1M(w[5])), one, w[0]);
             t8 = qsb_fadd(b8, 64u, t8);
             t8 = qsb_fadd(c8, 131072u, t8);
             w[7] = qsb_fadd(t8, one, 0x10020u);
-#endif
         }
 #else
         w[7] = qsb_fadd(qsb_fadd(qsb_fadd(w[7], one, QSB_s1M(w[5])), one, w[0]), one, QSB_s0M(w[8]));
 #endif
-#if QSB_FIN_W8S0 && QSB_FIN_W8ODD && QSB_FIN_W24_O8
-
-        w[8] = qsb_fadd(qsb_fadd(w[8] >> 23, 8388608u, QSB_s1M(w[6])), one, w[1]);
-#else
         w[8] = qsb_fadd(qsb_fadd(w[8], one, QSB_s1M(w[6])), one, w[1]);
-#endif
         w[9] = qsb_fadd(QSB_s1M(w[7]), one, w[2]);
         w[10] = qsb_fadd(QSB_s1M(w[8]), one, w[3]);
         w[11] = qsb_fadd(QSB_s1M(w[9]), one, w[4]);
@@ -695,11 +670,7 @@ __device__ __forceinline__ uint32_t _SHA256Pubkey33H0(const uint32_t m[9])
         w[15] = qsb_fadd(w[15], one, s1(w[13]));
         w[15] = qsb_fadd(w[15], one, w[8]);
         w[15] = qsb_fadd(w[15], one, s0(w[0]));
-#if QSB_FIN_R63_SUM && QSB_FIN_R63_LEA && QSB_FIN_LEA
-        const uint32_t r0 = a + w[15] + (qsb_klit(63) + QSB_IV0);
-        const uint32_t r1 = r0 + Ch(f,g,h) + Maj(b,c,d);
-        return qsb_add_ror2(qsb_add_ror6(r1, QSB_S1P(f)), QSB_S0P(b));
-#elif QSB_FIN_R63_SUM
+#if QSB_FIN_R63_SUM
         const uint32_t r0 = a + w[15] + (qsb_klit(63) + QSB_IV0);
         const uint32_t r1 = r0 + S1(f) + Ch(f,g,h);
         return r1 + S0(b) + Maj(b,c,d);
