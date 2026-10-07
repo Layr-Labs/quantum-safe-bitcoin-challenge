@@ -57,7 +57,7 @@ static cpu_set_t g_worker_set; static int g_worker_set_on = 0;
 #endif
 #define QSB_CG_BMAX QSB_CG_B
 #ifndef QSB_CG_PF
-#define QSB_CG_PF 4                       /* table prefetch distance, in 4-candidate blocks */
+#define QSB_CG_PF 2                       /* retained denominator/y cache: prefetch only next table window */
 #endif
 #define QSB_CG_MAXWIN 16
 #define QSB_CG_MAXW 256                   /* max worker threads */
@@ -231,7 +231,6 @@ static rwin g_rw[QSB_CG_MAXWIN];
 static inline unsigned recode(worker_t *w, int i, const uint64_t *q) {
     const layout_t &L = g_cg->lay;
     unsigned zmask = 0;
-    w->dig[0][i] = (uint32_t)(q[0] & g_rw[0].mask);
     uint64_t carry = 0;
     const int k = L.nwin - 1;
     for (int j = 1; j <= k; j++) {
@@ -253,7 +252,9 @@ static inline unsigned recode(worker_t *w, int i, const uint64_t *q) {
 #if QSB_CG_HIGHFOLD
     /* highfold: window 0 is the top unsigned index, bits 231..255 plus the final carry */
     if (L.pos[0] != 0) w->dig[0][i] = (uint32_t)((q[3] >> 39) + carry);
+    else
 #endif
+    w->dig[0][i] = (uint32_t)(q[0] & g_rw[0].mask);
     return zmask;
 }
 static void recode_init(const layout_t &L) {
@@ -285,8 +286,6 @@ static unsigned recode_avx2(worker_t *w, int np) {
     for (int i = 0; i < np; i += 4) {
         const __m256i q[4] = {_mm256_load_si256((const __m256i *)&w->zq[0][i]), _mm256_load_si256((const __m256i *)&w->zq[1][i]),
                               _mm256_load_si256((const __m256i *)&w->zq[2][i]), _mm256_load_si256((const __m256i *)&w->zq[3][i])};
-        const __m256i d0 = _mm256_and_si256(q[0], _mm256_set1_epi64x((long long)g_rw[0].mask));
-        _mm_storeu_si128((__m128i *)&w->dig[0][i], _mm256_castsi256_si128(_mm256_permutevar8x32_epi32(d0, idx)));
         __m256i carry = _mm256_setzero_si256();
         for (int j = 1; j <= k; j++) {
             const rwin &r = g_rw[j];
@@ -310,8 +309,12 @@ static unsigned recode_avx2(worker_t *w, int np) {
         if (L.pos[0] != 0) {
             const __m256i top = _mm256_add_epi64(_mm256_srli_epi64(q[3], 39), carry);
             _mm_storeu_si128((__m128i *)&w->dig[0][i], _mm256_castsi256_si128(_mm256_permutevar8x32_epi32(top, idx)));
-        }
+        } else
 #endif
+        {
+            const __m256i d0 = _mm256_and_si256(q[0], _mm256_set1_epi64x((long long)g_rw[0].mask));
+            _mm_storeu_si128((__m128i *)&w->dig[0][i], _mm256_castsi256_si128(_mm256_permutevar8x32_epi32(d0, idx)));
+        }
     }
     return zmask;
 }
@@ -451,17 +454,17 @@ static unsigned z_shani_2(worker_t *w, int i0) {
     return 0;
 }
 
-/* pad the digit arrays (prefetch overrun, 4-lane blocks) and set the per-block zero-digit flags;
- * np = computed candidates (multiple of 8), zmask = windows with a zero digit */
+/* Set zero-digit flags for every computed four-lane block. All three EC backends
+ * bound data and prefetch digit reads below 4*ceil(n/4) <= np; no extra tail is read.
+ * np retains the actual SHA/recode padding lanes (multiple of 8). */
 static void finish_digits(worker_t *w, int np, unsigned zmask) {
     shared_t *S = g_cg;
-    for (int j = 0; j < S->lay.nwin; j++) for (int i = np; i < np + 32; i++) w->dig[j][i] = w->dig[j][np - 1];
     const int nb = np / 4;
     for (int j = 1; j < S->lay.nwin; j++) {
-        if (!(zmask >> j & 1)) { memset(w->zf[j], 0, (size_t)nb + 8); continue; }
-        for (int b = 0; b < nb + 8; b++) {
+        if (!(zmask >> j & 1)) { memset(w->zf[j], 0, (size_t)nb); continue; }
+        for (int b = 0; b < nb; b++) {
             uint8_t f = 0;
-            if (b < nb) for (int l = 0; l < 4; l++) f |= (uint8_t)QCG_ZERO(w->dig[j][4 * b + l]);
+            for (int l = 0; l < 4; l++) f |= (uint8_t)QCG_ZERO(w->dig[j][4 * b + l]);
             w->zf[j][b] = f;
         }
     }
