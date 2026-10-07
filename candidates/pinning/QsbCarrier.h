@@ -25,6 +25,7 @@
 #include <tuple>
 #include <utility>
 #include <type_traits>
+#include "DriverLaunch.h"
 
 #ifndef QSB_CARRIER
 #define QSB_CARRIER 1
@@ -151,6 +152,7 @@ static void qsb_carrier_init(const cudaDeviceProp &prop) {
     if (e != cudaSuccess || zeros != QSB_ZEROS_N) { qsb_carrier_off("image built for another QSB_ZEROS_N"); return; }
     g_qsb_carrier.on = 1;
     g_qsb_carrier.nojit = QSB_NOJIT && all;
+    qsb_driver::init();
     printf("  Native sm_89 carrier: on (%zu-byte image, sha256 %.16s..., L2::64B record loads, %s)\n",
            len, qsb_carrier_cubin_sha256, g_qsb_carrier.nojit ? "no compute_52 JIT" : "root kernels partly compute_52");
 }
@@ -168,7 +170,7 @@ static cudaError_t qsb_carrier_launch_impl(int kid, dim3 g, dim3 b, cudaStream_t
                                            std::index_sequence<I...>, A &&...a) {
     std::tuple<typename std::decay<P>::type...> vals(std::forward<A>(a)...);
     void *argv[sizeof...(P) > 0 ? sizeof...(P) : 1] = {(void *)&std::get<I>(vals)...};
-    return cudaLaunchKernel((const void *)g_qsb_carrier.k[kid], g, b, argv, 0, st);
+    return qsb_driver::enqueue(g_qsb_carrier.k[kid], g, b, argv, st);
 }
 template <typename... P, typename... A>
 static cudaError_t qsb_carrier_launch(void (*)(P...), int kid, dim3 g, dim3 b, cudaStream_t st,
