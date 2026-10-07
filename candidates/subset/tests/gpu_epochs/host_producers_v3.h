@@ -954,12 +954,27 @@ static Slot *acquire(int64_t k) {
 static cudaError_t upload(Slot *s, cudaStream_t st, void *d_ep, uint32_t *d_fi, size_t fi_pitch, int n) {
     Hp *h = g_hp;
     const size_t w = (size_t)h->P.ncls * 32;
+#if QSB_PAIR_SHARED && ZLAB_DUAL_EPOCH_SHA && QSB_HIT_NO_COMBO && QSB_HOST_VERIFY
+    /* The paired digest consumes first states and publishes identity tags, not
+     * epoch descriptors. Batch-zero self-check and GPU fallback still build
+     * and validate descriptors. Keep an exact-copy A/B mode in this binary. */
+    static const bool upload_desc = [] {
+        const char *s = getenv("QSB_HP_UPLOAD_DESC");
+        const bool copy = s && atoi(s) != 0;
+        printf("  Host producer descriptor upload: %s\n", copy ? "baseline" : "elided (unused by paired digest)");
+        fflush(stdout);
+        return copy;
+    }();
+#else
+    const bool upload_desc = true;
+#endif
     cudaError_t e = cudaSuccess;
     for (int p = 0; p < NPIECE && e == cudaSuccess; p++) {
         const int64_t lo = (int64_t)p * (int64_t)h->pe;
         if (lo >= n) break;
         const size_t np = (size_t)((int64_t)n - lo < (int64_t)h->pe ? (int64_t)n - lo : (int64_t)h->pe);
-        e = cudaMemcpyAsync((uint8_t *)d_ep + (size_t)lo * 64, s->ep[p], np * 64, cudaMemcpyHostToDevice, st);
+        if (upload_desc)
+            e = cudaMemcpyAsync((uint8_t *)d_ep + (size_t)lo * 64, s->ep[p], np * 64, cudaMemcpyHostToDevice, st);
         if (e == cudaSuccess)
             e = cudaMemcpy2DAsync((uint8_t *)d_fi + (size_t)lo * fi_pitch, fi_pitch, s->fi[p], w, w, np, cudaMemcpyHostToDevice, st);
     }
