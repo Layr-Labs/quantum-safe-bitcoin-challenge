@@ -403,7 +403,7 @@ static_assert(alignof(ulonglong2) == 16, "pipeline vector must be 16-byte aligne
 #error "QSB_L2_FETCH must be 0, 1, 32, 64 or 128"
 #endif
 #ifndef QSB_HOST_READBACK
-#define QSB_HOST_READBACK 0   /* delta A (jungjipdo a91746ca): one blocking readback of counter+indices per batch */
+#define QSB_HOST_READBACK 1   /* dukemawex: host hit readback on; one blocking counter+indices sync per batch */
 #endif
 /* QSB_FAST_START (host only, no device code): start-up overlap inside the timed window.
  * The harness times the whole process, so every start-up second costs 1/1200 of the score.
